@@ -13,9 +13,10 @@ use crate::error::AppResult;
 #[derive(
     Clone, Copy, Debug, Serialize, Deserialize, PartialEq, Eq, Hash,
 )]
-#[serde(rename_all = "snake_case")]
 pub enum RuntimeId {
+    #[serde(rename = "llama_cpp")]
     LlamaCpp,
+    #[serde(rename = "litert_lm")]
     LiteRtLm,
 }
 
