@@ -15,7 +15,7 @@ use serde::{Deserialize, Serialize};
 use tokio::process::{Child, Command};
 use tokio::sync::Mutex;
 
-use crate::core::{GenOpts, Message, Modality, Model, Part, Role, TokenChunk};
+use crate::core::{GenOpts, Message, Model, Part, Role, TokenChunk};
 use crate::error::{AppError, AppResult};
 use crate::runtimes::{
     Capabilities, LoadOpts, Runtime, RuntimeId, SessionHandle,

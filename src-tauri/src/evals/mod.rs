@@ -31,7 +31,7 @@ pub trait Eval: Send + Sync {
     async fn run(
         &self,
         model: &Model,
-        runtime: &(dyn Runtime),
+        runtime: &dyn Runtime,
         cfg: EvalCfg,
     ) -> AppResult<EvalReport>;
 }
@@ -51,7 +51,7 @@ impl Eval for NotImplementedEval {
     async fn run(
         &self,
         _model: &Model,
-        _runtime: &(dyn Runtime),
+        _runtime: &dyn Runtime,
         _cfg: EvalCfg,
     ) -> AppResult<EvalReport> {
         Err(AppError::NotImplemented("eval"))
