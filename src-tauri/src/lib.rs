@@ -61,6 +61,18 @@ pub fn run() {
     let app_dir = crate::core::paths::app_data_dir();
     std::fs::create_dir_all(&app_dir).expect("create app data dir");
 
+    // Kill any orphaned llama-server processes from a previous crashed run.
+    // Our Drop handler only sends a kill signal and doesn't wait, so a hard
+    // exit (Ctrl-C of the parent, panic, segfault) can leave the runtime
+    // process holding port 18080 — and the next launch fails to bind.
+    // pkill is best-effort; missing pkill (Windows) is silently fine.
+    #[cfg(unix)]
+    {
+        let _ = std::process::Command::new("pkill")
+            .args(["-f", "llama-server"])
+            .output();
+    }
+
     let store = Store::open(app_dir.join("store.sqlite"))
         .expect("open SQLite store");
     let registry = Registry::with_seed(app_dir.clone());

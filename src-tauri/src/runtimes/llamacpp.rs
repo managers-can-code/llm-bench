@@ -111,8 +111,11 @@ impl Runtime for LlamaCppRuntime {
             }
         }
 
-        // Drop existing server (Drop kills the child).
-        g.server = None;
+        // Drop existing server (Drop kills the child) and give the OS time
+        // to release port 18080 before we try to bind again.
+        if g.server.take().is_some() {
+            tokio::time::sleep(Duration::from_millis(750)).await;
+        }
 
         let model_path = self
             .local_model_path(model)
