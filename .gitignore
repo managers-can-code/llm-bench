@@ -1,0 +1,42 @@
+# dependencies
+node_modules/
+.pnpm-store/
+
+# builds
+dist/
+dist-ssr/
+build/
+*.local
+vite.config.ts.timestamp-*
+
+# Rust / Tauri
+src-tauri/target/
+src-tauri/Cargo.lock
+src-tauri/gen/
+
+# editor
+.vscode/*
+!.vscode/extensions.json
+.idea/
+*.suo
+*.ntvs*
+*.njsproj
+*.sln
+*.sw?
+
+# logs
+npm-debug.log*
+pnpm-debug.log*
+yarn-debug.log*
+
+# os
+.DS_Store
+Thumbs.db
+
+# app runtime data (these go in ~/.llm-bench/, never in repo)
+.llm-bench/
+
+# secrets
+.env
+.env.*
+!.env.example

@@ -1,0 +1,102 @@
+[
+  {
+    "id": "gemma-4-26b-a4b-q4kxl",
+    "display_name": "Gemma 4 26B-A4B (MoE)",
+    "family": "gemma_4",
+    "arch": { "kind": "moe", "active_b": 4.0, "total_b": 26.0 },
+    "modalities": ["text", "vision"],
+    "quant": "ud_q4_k_xl",
+    "ctx_max": 262144,
+    "bindings": [
+      {
+        "runtime": "llama_cpp",
+        "hf_repo": "unsloth/gemma-4-26B-A4B-it-GGUF",
+        "hf_file": "gemma-4-26B-A4B-it-UD-Q4_K_XL.gguf",
+        "size_gb": 16.0,
+        "available": true
+      },
+      {
+        "runtime": "litert_lm",
+        "hf_repo": "litert-community/gemma-4-26B-A4B-it-litert-lm",
+        "hf_file": "gemma-4-26B-A4B-it.litertlm",
+        "size_gb": 16.0,
+        "available": false
+      }
+    ]
+  },
+  {
+    "id": "gemma-4-31b-dense-q4kxl",
+    "display_name": "Gemma 4 31B (dense)",
+    "family": "gemma_4",
+    "arch": { "kind": "dense" },
+    "modalities": ["text", "vision"],
+    "quant": "ud_q4_k_xl",
+    "ctx_max": 131072,
+    "bindings": [
+      {
+        "runtime": "llama_cpp",
+        "hf_repo": "unsloth/gemma-4-31B-it-GGUF",
+        "hf_file": "gemma-4-31B-it-UD-Q4_K_XL.gguf",
+        "size_gb": 20.0,
+        "available": true
+      },
+      {
+        "runtime": "litert_lm",
+        "hf_repo": "litert-community/gemma-4-31B-it-litert-lm",
+        "hf_file": "gemma-4-31B-it.litertlm",
+        "size_gb": 20.0,
+        "available": false
+      }
+    ]
+  },
+  {
+    "id": "qwen-3-6-27b-dense-q4kxl",
+    "display_name": "Qwen 3.6 27B (dense)",
+    "family": "qwen_3_6",
+    "arch": { "kind": "dense" },
+    "modalities": ["text"],
+    "quant": "ud_q4_k_xl",
+    "ctx_max": 262144,
+    "bindings": [
+      {
+        "runtime": "llama_cpp",
+        "hf_repo": "unsloth/Qwen3.6-27B-GGUF",
+        "hf_file": "Qwen3.6-27B-UD-Q4_K_XL.gguf",
+        "size_gb": 18.0,
+        "available": true
+      },
+      {
+        "runtime": "litert_lm",
+        "hf_repo": "litert-community/Qwen3.6-27B-litert-lm",
+        "hf_file": "Qwen3.6-27B.litertlm",
+        "size_gb": 18.0,
+        "available": false
+      }
+    ]
+  },
+  {
+    "id": "qwen-3-6-35b-a3b-q4kxl",
+    "display_name": "Qwen 3.6 35B-A3B (MoE)",
+    "family": "qwen_3_6",
+    "arch": { "kind": "moe", "active_b": 3.0, "total_b": 35.0 },
+    "modalities": ["text"],
+    "quant": "ud_q4_k_xl",
+    "ctx_max": 262144,
+    "bindings": [
+      {
+        "runtime": "llama_cpp",
+        "hf_repo": "unsloth/Qwen3.6-35B-A3B-GGUF",
+        "hf_file": "Qwen3.6-35B-A3B-UD-Q4_K_XL.gguf",
+        "size_gb": 22.0,
+        "available": true
+      },
+      {
+        "runtime": "litert_lm",
+        "hf_repo": "litert-community/Qwen3.6-35B-A3B-litert-lm",
+        "hf_file": "Qwen3.6-35B-A3B.litertlm",
+        "size_gb": 22.0,
+        "available": false
+      }
+    ]
+  }
+]
