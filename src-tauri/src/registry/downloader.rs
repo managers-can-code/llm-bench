@@ -106,6 +106,12 @@ pub async fn download(
         .await?;
     file.seek(std::io::SeekFrom::Start(already)).await?;
 
+    // Authoritative total = bytes already on disk + Content-Length of this response.
+    // If Content-Length is missing (rare for HF), we accept any stream length but
+    // can't verify completion.
+    let response_len = resp.content_length();
+    let authoritative_total = response_len.map(|c| c + already);
+
     let mut stream = resp.bytes_stream();
     let mut done: u64 = already;
     let mut last_emit = std::time::Instant::now();
@@ -131,6 +137,18 @@ pub async fn download(
     }
     file.flush().await?;
     drop(file);
+
+    // Refuse silent truncation: if the server told us how many bytes to expect
+    // and we got fewer, fail and leave the partial on disk for the next call to
+    // resume against.
+    if let Some(want) = authoritative_total {
+        if done < want {
+            return Err(AppError::Invalid(format!(
+                "download truncated: got {} of {} bytes for {} (will resume on next download)",
+                done, want, binding.hf_file
+            )));
+        }
+    }
 
     if let Some(expected) = &binding.sha256 {
         emit(
