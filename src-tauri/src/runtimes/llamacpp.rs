@@ -7,7 +7,7 @@
 use std::path::PathBuf;
 use std::process::Stdio;
 use std::sync::Arc;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use async_trait::async_trait;
 use futures::stream::{self, BoxStream, StreamExt};
@@ -150,7 +150,9 @@ impl Runtime for LlamaCppRuntime {
             cmd.arg("--n-gpu-layers").arg(layers.to_string());
         }
 
-        cmd.stdout(Stdio::piped()).stderr(Stdio::piped());
+        // Inherit stdio so llama-server's startup logs appear in the dev console.
+        // (v0.2: capture into ring buffer, surface in UI.)
+        cmd.stdout(Stdio::inherit()).stderr(Stdio::inherit());
 
         let child = cmd.spawn()?;
         g.server = Some(ServerProcess {
@@ -158,23 +160,34 @@ impl Runtime for LlamaCppRuntime {
             model_id: model.id.clone(),
         });
 
-        // Wait until /health responds.
+        // Wait until /health responds. A 22 GB int4 model on cold-cache mmap
+        // can take well over 30s to load on first run; allow up to 5 min.
         let url = format!("{}/health", g.base_url);
         let http = g.http.clone();
         drop(g);
-        for _ in 0..60 {
-            if let Ok(r) = http.get(&url).send().await {
-                if r.status().is_success() {
+        let deadline = Instant::now() + Duration::from_secs(300);
+        let mut last_err: Option<String> = None;
+        while Instant::now() < deadline {
+            match http.get(&url).send().await {
+                Ok(r) if r.status().is_success() => {
+                    tracing::info!("llama-server ready");
                     return Ok(SessionHandle {
                         id: model.id.clone(),
                     });
                 }
+                Ok(r) => {
+                    last_err = Some(format!("health responded {}", r.status()));
+                }
+                Err(e) => {
+                    last_err = Some(format!("connect: {e}"));
+                }
             }
             tokio::time::sleep(Duration::from_millis(500)).await;
         }
-        Err(AppError::RuntimeUnavailable(
-            "llama-server did not become healthy in 30s".into(),
-        ))
+        Err(AppError::RuntimeUnavailable(format!(
+            "llama-server did not become healthy in 5 min (last: {})",
+            last_err.unwrap_or_else(|| "no attempt".into())
+        )))
     }
 
     async fn unload(&self, _h: &SessionHandle) -> AppResult<()> {
