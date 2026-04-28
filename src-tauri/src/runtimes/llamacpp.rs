@@ -15,7 +15,7 @@ use serde::{Deserialize, Serialize};
 use tokio::process::{Child, Command};
 use tokio::sync::Mutex;
 
-use crate::core::{GenOpts, Message, Model, Part, Role, TokenChunk};
+use crate::core::{Arch, GenOpts, Message, Model, Part, Role, TokenChunk};
 use crate::error::{AppError, AppResult};
 use crate::runtimes::{
     Capabilities, LoadOpts, Runtime, RuntimeId, SessionHandle,
@@ -151,6 +151,17 @@ impl Runtime for LlamaCppRuntime {
 
         if let Some(layers) = opts.gpu_layers {
             cmd.arg("--n-gpu-layers").arg(layers.to_string());
+        }
+
+        // For MoE models on memory-constrained GPUs (e.g. Apple Silicon's
+        // ~19 GB working set), offload expert tensors to CPU. Active params
+        // (attention, embeddings, the few "active" expert columns per token)
+        // stay on GPU. On unified-memory Macs the CPU side still reads from
+        // shared RAM at ~400 GB/s, so the perf hit is modest while VRAM
+        // pressure drops dramatically. v0.2: make this configurable per-model.
+        if matches!(model.arch, Arch::Moe { .. }) {
+            cmd.arg("--override-tensor")
+                .arg("\\.ffn_.*_exps\\.=CPU");
         }
 
         // Inherit stdio so llama-server's startup logs appear in the dev console.
