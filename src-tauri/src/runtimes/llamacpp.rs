@@ -133,6 +133,10 @@ impl Runtime for LlamaCppRuntime {
             )));
         }
 
+        // Default ctx of 4096 keeps total VRAM (model + KV + compute) inside
+        // the M-series working-set limit on consumer Macs. Users with more VRAM
+        // can override via LoadOpts. Default batch of 512 keeps the compute
+        // buffer modest; raising it speeds up prefill at the cost of more VRAM.
         let mut cmd = Command::new(bin);
         cmd.arg("--model")
             .arg(&model_path)
@@ -141,11 +145,10 @@ impl Runtime for LlamaCppRuntime {
             .arg("--host")
             .arg("127.0.0.1")
             .arg("--ctx-size")
-            .arg(opts.ctx.unwrap_or(8192).to_string());
+            .arg(opts.ctx.unwrap_or(4096).to_string())
+            .arg("--batch-size")
+            .arg(opts.batch.unwrap_or(512).to_string());
 
-        if let Some(b) = opts.batch {
-            cmd.arg("--batch-size").arg(b.to_string());
-        }
         if let Some(layers) = opts.gpu_layers {
             cmd.arg("--n-gpu-layers").arg(layers.to_string());
         }
