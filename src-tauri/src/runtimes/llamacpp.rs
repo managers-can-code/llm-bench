@@ -167,6 +167,12 @@ impl Runtime for LlamaCppRuntime {
             // (the canonical Mixtral / Gemma-MoE / Qwen-MoE expert names).
             cmd.arg("--override-tensor")
                 .arg("\\.ffn_(up|down|gate)_exps\\.weight=CPU");
+            // mmap + override-tensor is a known footgun: with mmap enabled,
+            // pages "routed" to CPU still get demand-paged into Metal's
+            // working set on Apple Silicon, defeating the offload. Disable
+            // mmap so each device gets explicit, separate buffer allocation.
+            // Cost: ~30s slower model load on cold cache; worth it.
+            cmd.arg("--no-mmap");
         }
 
         tracing::info!(
