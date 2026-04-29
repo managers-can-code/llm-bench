@@ -163,9 +163,21 @@ impl Runtime for LlamaCppRuntime {
         // shared RAM at ~400 GB/s, so the perf hit is modest while VRAM
         // pressure drops dramatically. v0.2: make this configurable per-model.
         if matches!(model.arch, Arch::Moe { .. }) {
+            // Pattern matches blk.N.ffn_{up,down,gate}_exps.weight tensors
+            // (the canonical Mixtral / Gemma-MoE / Qwen-MoE expert names).
             cmd.arg("--override-tensor")
-                .arg("\\.ffn_.*_exps\\.=CPU");
+                .arg("\\.ffn_(up|down|gate)_exps\\.weight=CPU");
         }
+
+        tracing::info!(
+            "spawning llama-server: {} {}",
+            cmd.as_std().get_program().to_string_lossy(),
+            cmd.as_std()
+                .get_args()
+                .map(|a| a.to_string_lossy().into_owned())
+                .collect::<Vec<_>>()
+                .join(" ")
+        );
 
         // Inherit stdio so llama-server's startup logs appear in the dev console.
         // (v0.2: capture into ring buffer, surface in UI.)
