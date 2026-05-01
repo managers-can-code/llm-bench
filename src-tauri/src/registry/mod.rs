@@ -17,8 +17,8 @@ pub struct Registry {
 
 impl Registry {
     pub fn with_seed(app_dir: PathBuf) -> Self {
-        let models: Vec<Model> = serde_json::from_str(SEED_JSON)
-            .expect("seed.json is malformed — fix it");
+        let models: Vec<Model> =
+            serde_json::from_str(SEED_JSON).expect("seed.json is malformed — fix it");
         Self { app_dir, models }
     }
 

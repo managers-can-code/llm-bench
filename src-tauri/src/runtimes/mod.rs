@@ -1,7 +1,7 @@
 //! Runtime abstraction. Each backend (llama.cpp, LiteRT-LM) implements this trait.
 
-pub mod llamacpp;
 pub mod litertlm;
+pub mod llamacpp;
 
 use async_trait::async_trait;
 use futures::stream::BoxStream;

@@ -15,9 +15,7 @@ use futures::stream::{self, BoxStream, StreamExt};
 
 use crate::core::{GenOpts, Message, Model, TokenChunk};
 use crate::error::{AppError, AppResult};
-use crate::runtimes::{
-    Capabilities, LoadOpts, Runtime, RuntimeId, SessionHandle,
-};
+use crate::runtimes::{Capabilities, LoadOpts, Runtime, RuntimeId, SessionHandle};
 
 pub struct LiteRtLmRuntime {
     app_dir: PathBuf,
@@ -85,8 +83,7 @@ impl Runtime for LiteRtLmRuntime {
     ) -> AppResult<BoxStream<'a, AppResult<TokenChunk>>> {
         // v0.1 stub. Returns a single chunk explaining the state of the world.
         let chunk = TokenChunk {
-            text: "[LiteRT-LM adapter is stubbed in v0.1 — see PLAN.md §12]"
-                .to_string(),
+            text: "[LiteRT-LM adapter is stubbed in v0.1 — see PLAN.md §12]".to_string(),
             done: true,
             metrics: None,
         };

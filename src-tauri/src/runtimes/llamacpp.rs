@@ -17,9 +17,7 @@ use tokio::sync::Mutex;
 
 use crate::core::{Arch, GenOpts, Message, Model, Part, Role, TokenChunk};
 use crate::error::{AppError, AppResult};
-use crate::runtimes::{
-    Capabilities, LoadOpts, Runtime, RuntimeId, SessionHandle,
-};
+use crate::runtimes::{Capabilities, LoadOpts, Runtime, RuntimeId, SessionHandle};
 
 pub struct LlamaCppRuntime {
     app_dir: PathBuf,

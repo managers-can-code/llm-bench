@@ -24,7 +24,7 @@ use std::sync::Arc;
 use tokio::sync::Mutex;
 
 use crate::registry::Registry;
-use crate::runtimes::{llamacpp::LlamaCppRuntime, litertlm::LiteRtLmRuntime, RuntimeId};
+use crate::runtimes::{litertlm::LiteRtLmRuntime, llamacpp::LlamaCppRuntime, RuntimeId};
 use crate::store::Store;
 
 /// App state held inside Tauri. Cheap to clone (Arc).
@@ -36,10 +36,7 @@ pub struct AppState {
 }
 
 impl AppState {
-    pub fn runtime(
-        &self,
-        id: RuntimeId,
-    ) -> Arc<dyn crate::runtimes::Runtime + Send + Sync> {
+    pub fn runtime(&self, id: RuntimeId) -> Arc<dyn crate::runtimes::Runtime + Send + Sync> {
         match id {
             RuntimeId::LlamaCpp => self.llama_cpp.clone(),
             RuntimeId::LiteRtLm => self.litert_lm.clone(),
@@ -73,8 +70,7 @@ pub fn run() {
             .output();
     }
 
-    let store = Store::open(app_dir.join("store.sqlite"))
-        .expect("open SQLite store");
+    let store = Store::open(app_dir.join("store.sqlite")).expect("open SQLite store");
     let registry = Registry::with_seed(app_dir.clone());
 
     let state = AppState {

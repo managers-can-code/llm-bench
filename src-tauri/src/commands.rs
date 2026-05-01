@@ -195,9 +195,7 @@ pub struct RuntimeStatus {
 }
 
 #[tauri::command]
-pub async fn runtime_status(
-    state: State<'_, AppState>,
-) -> AppResult<Vec<RuntimeStatus>> {
+pub async fn runtime_status(state: State<'_, AppState>) -> AppResult<Vec<RuntimeStatus>> {
     let mut out = Vec::new();
     for id in [RuntimeId::LlamaCpp, RuntimeId::LiteRtLm] {
         let r = state.runtime(id);
