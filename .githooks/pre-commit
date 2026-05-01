@@ -1,0 +1,27 @@
+#!/usr/bin/env bash
+# Pre-commit hook: keep CI green by running fmt + clippy locally.
+# Install once with:  git config core.hooksPath .githooks
+set -e
+
+# Only run if any Rust files are staged.
+if git diff --cached --name-only | grep -q '\.rs$'; then
+  echo "[pre-commit] cargo fmt --check"
+  (cd src-tauri && cargo fmt --all -- --check) || {
+    echo "[pre-commit] formatting drift; run 'cargo fmt --all' in src-tauri"
+    exit 1
+  }
+  echo "[pre-commit] cargo clippy"
+  (cd src-tauri && cargo clippy --all-targets -- -D warnings) || {
+    echo "[pre-commit] clippy lints; fix or allow them"
+    exit 1
+  }
+fi
+
+# Only run if any TS/TSX files are staged.
+if git diff --cached --name-only | grep -qE '\.(ts|tsx)$'; then
+  echo "[pre-commit] tsc --noEmit"
+  npx tsc --noEmit || {
+    echo "[pre-commit] TypeScript errors"
+    exit 1
+  }
+fi
