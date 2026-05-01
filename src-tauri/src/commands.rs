@@ -72,9 +72,7 @@ pub async fn delete_local_model(
 /* ---------- conversations ---------- */
 
 #[tauri::command]
-pub async fn list_conversations(
-    state: State<'_, AppState>,
-) -> AppResult<Vec<Conversation>> {
+pub async fn list_conversations(state: State<'_, AppState>) -> AppResult<Vec<Conversation>> {
     let store = state.store.lock().await;
     store.list_conversations()
 }
@@ -93,19 +91,13 @@ pub async fn create_conversation(
 }
 
 #[tauri::command]
-pub async fn get_conversation(
-    state: State<'_, AppState>,
-    id: String,
-) -> AppResult<Conversation> {
+pub async fn get_conversation(state: State<'_, AppState>, id: String) -> AppResult<Conversation> {
     let store = state.store.lock().await;
     store.get_conversation(&id)
 }
 
 #[tauri::command]
-pub async fn delete_conversation(
-    state: State<'_, AppState>,
-    id: String,
-) -> AppResult<()> {
+pub async fn delete_conversation(state: State<'_, AppState>, id: String) -> AppResult<()> {
     let store = state.store.lock().await;
     store.delete_conversation(&id)
 }
@@ -187,10 +179,7 @@ pub async fn start_chat_turn(
 }
 
 #[tauri::command]
-pub async fn cancel_chat(
-    _state: State<'_, AppState>,
-    _turn_id: String,
-) -> AppResult<()> {
+pub async fn cancel_chat(_state: State<'_, AppState>, _turn_id: String) -> AppResult<()> {
     // TODO: maintain a turn_id -> abort-handle map and signal it here.
     Err(AppError::NotImplemented("cancel_chat"))
 }

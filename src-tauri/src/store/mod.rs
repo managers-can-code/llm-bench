@@ -40,8 +40,7 @@ impl Store {
         })?;
         let mut out = Vec::new();
         for row in rows {
-            let (id, title, model_id, runtime_s, messages_json, created_at, updated_at) =
-                row?;
+            let (id, title, model_id, runtime_s, messages_json, created_at, updated_at) = row?;
             let runtime: RuntimeId = serde_json::from_str(&format!("\"{}\"", runtime_s))
                 .map_err(crate::error::AppError::Json)?;
             let messages: Vec<Message> = serde_json::from_str(&messages_json)?;

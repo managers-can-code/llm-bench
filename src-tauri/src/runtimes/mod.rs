@@ -10,9 +10,7 @@ use serde::{Deserialize, Serialize};
 use crate::core::{GenOpts, Message, Modality, Model, TokenChunk};
 use crate::error::AppResult;
 
-#[derive(
-    Clone, Copy, Debug, Serialize, Deserialize, PartialEq, Eq, Hash,
-)]
+#[derive(Clone, Copy, Debug, Serialize, Deserialize, PartialEq, Eq, Hash)]
 pub enum RuntimeId {
     #[serde(rename = "llama_cpp")]
     LlamaCpp,
