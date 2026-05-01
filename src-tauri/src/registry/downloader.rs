@@ -100,6 +100,7 @@ pub async fn download(
 
     let mut file = File::options()
         .create(true)
+        .truncate(false) // keep existing bytes; resume writes from `already`
         .write(true)
         .read(true)
         .open(dest)
