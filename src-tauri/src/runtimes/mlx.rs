@@ -260,8 +260,12 @@ impl Runtime for MlxRuntime {
         let http = g.http.clone();
         drop(g);
 
+        // mlx_lm.server uses the literal "default_model" to refer to whatever
+        // was passed to --model at launch. Sending anything else (e.g. "local")
+        // causes the server to attempt an HF Hub lookup for that name, get 401,
+        // and 404 the chat request.
         let body = ChatRequest {
-            model: "local".into(),
+            model: "default_model".into(),
             messages: msgs.iter().map(to_oai_message).collect(),
             stream: true,
             temperature: opts.temperature,
