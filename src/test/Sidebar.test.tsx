@@ -15,8 +15,8 @@ describe("Sidebar", () => {
   test("renders the app brand and version", () => {
     renderInRouter();
     expect(screen.getByText("llm-bench")).toBeInTheDocument();
-    // Skeleton tag is part of the version line.
-    expect(screen.getByText(/skeleton/i)).toBeInTheDocument();
+    // Version line uses package.json version.
+    expect(screen.getByText(/^v\d+\.\d+\.\d+$/)).toBeInTheDocument();
   });
 
   test("links to all five primary pages", () => {
