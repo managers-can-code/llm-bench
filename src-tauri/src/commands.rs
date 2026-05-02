@@ -290,6 +290,16 @@ pub async fn start_chat_turn(
     user_message: Message,
     opts: GenOpts,
 ) -> AppResult<String> {
+    // Chat-friendly defaults applied across all runtimes. mlx_lm.server in
+    // particular defaults to temperature=0 (greedy), which causes severe
+    // repetition on small instruct models. Caller-specified values still win.
+    let opts = GenOpts {
+        temperature: opts.temperature.or(Some(0.7)),
+        top_p: opts.top_p.or(Some(0.95)),
+        max_tokens: opts.max_tokens.or(Some(512)),
+        seed: opts.seed,
+    };
+
     // 1. Append user message + assistant placeholder, persist.
     let mut conv = {
         let store = state.store.lock().await;
