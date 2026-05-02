@@ -26,6 +26,13 @@ export const deleteLocalModel = (
 ): Promise<void> =>
   invoke("delete_local_model", { modelId, runtime });
 
+export const importModel = (
+  runtime: RuntimeId,
+  sourcePath: string,
+  displayName: string,
+): Promise<Model> =>
+  invoke("import_model", { runtime, sourcePath, displayName });
+
 export const onDownloadProgress = (
   cb: (p: DownloadProgress) => void,
 ): Promise<UnlistenFn> => listen<DownloadProgress>("model:download", (e) => cb(e.payload));

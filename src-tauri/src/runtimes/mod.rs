@@ -1,7 +1,9 @@
-//! Runtime abstraction. Each backend (llama.cpp, LiteRT-LM) implements this trait.
+//! Runtime abstraction. Each backend (llama.cpp, LiteRT-LM, MLX) implements
+//! this trait.
 
 pub mod litertlm;
 pub mod llamacpp;
+pub mod mlx;
 
 use async_trait::async_trait;
 use futures::stream::BoxStream;
@@ -16,6 +18,8 @@ pub enum RuntimeId {
     LlamaCpp,
     #[serde(rename = "litert_lm")]
     LiteRtLm,
+    #[serde(rename = "mlx")]
+    Mlx,
 }
 
 impl RuntimeId {
@@ -23,7 +27,12 @@ impl RuntimeId {
         match self {
             RuntimeId::LlamaCpp => "llama_cpp",
             RuntimeId::LiteRtLm => "litert_lm",
+            RuntimeId::Mlx => "mlx",
         }
+    }
+
+    pub fn all() -> [RuntimeId; 3] {
+        [RuntimeId::LlamaCpp, RuntimeId::LiteRtLm, RuntimeId::Mlx]
     }
 }
 

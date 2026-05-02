@@ -24,7 +24,9 @@ use std::sync::Arc;
 use tokio::sync::Mutex;
 
 use crate::registry::Registry;
-use crate::runtimes::{litertlm::LiteRtLmRuntime, llamacpp::LlamaCppRuntime, RuntimeId};
+use crate::runtimes::{
+    litertlm::LiteRtLmRuntime, llamacpp::LlamaCppRuntime, mlx::MlxRuntime, RuntimeId,
+};
 use crate::store::Store;
 
 /// App state held inside Tauri. Cheap to clone (Arc).
@@ -33,6 +35,7 @@ pub struct AppState {
     pub store: Arc<Mutex<Store>>,
     pub llama_cpp: Arc<LlamaCppRuntime>,
     pub litert_lm: Arc<LiteRtLmRuntime>,
+    pub mlx: Arc<MlxRuntime>,
 }
 
 impl AppState {
@@ -40,6 +43,7 @@ impl AppState {
         match id {
             RuntimeId::LlamaCpp => self.llama_cpp.clone(),
             RuntimeId::LiteRtLm => self.litert_lm.clone(),
+            RuntimeId::Mlx => self.mlx.clone(),
         }
     }
 }
@@ -78,15 +82,18 @@ pub fn run() {
         store: Arc::new(Mutex::new(store)),
         llama_cpp: Arc::new(LlamaCppRuntime::new(app_dir.clone())),
         litert_lm: Arc::new(LiteRtLmRuntime::new(app_dir.clone())),
+        mlx: Arc::new(MlxRuntime::new(app_dir.clone())),
     };
 
     tauri::Builder::default()
         .plugin(tauri_plugin_shell::init())
+        .plugin(tauri_plugin_dialog::init())
         .manage(state)
         .invoke_handler(tauri::generate_handler![
             commands::list_models,
             commands::download_model,
             commands::delete_local_model,
+            commands::import_model,
             commands::list_conversations,
             commands::create_conversation,
             commands::get_conversation,

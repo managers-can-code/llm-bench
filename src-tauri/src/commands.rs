@@ -69,6 +69,184 @@ pub async fn delete_local_model(
     Ok(())
 }
 
+#[tauri::command]
+pub async fn import_model(
+    state: State<'_, AppState>,
+    runtime: RuntimeId,
+    source_path: String,
+    display_name: String,
+) -> AppResult<Model> {
+    use std::path::Path;
+
+    let src = Path::new(&source_path);
+    if !src.exists() {
+        return Err(AppError::NotFound(format!(
+            "source path does not exist: {}",
+            source_path
+        )));
+    }
+
+    // Validate format per runtime.
+    let is_dir = src.is_dir();
+    let ext = src
+        .extension()
+        .and_then(|s| s.to_str())
+        .unwrap_or("")
+        .to_lowercase();
+    match runtime {
+        RuntimeId::LlamaCpp => {
+            if is_dir || ext != "gguf" {
+                return Err(AppError::Invalid(
+                    "llama.cpp expects a single .gguf file".into(),
+                ));
+            }
+        }
+        RuntimeId::LiteRtLm => {
+            if is_dir || ext != "litertlm" {
+                return Err(AppError::Invalid(
+                    "LiteRT-LM expects a single .litertlm file".into(),
+                ));
+            }
+        }
+        RuntimeId::Mlx => {
+            if !is_dir {
+                return Err(AppError::Invalid(
+                    "MLX expects a directory containing config.json + safetensors + tokenizer"
+                        .into(),
+                ));
+            }
+            // Sanity: directory should have a config.json.
+            if !src.join("config.json").exists() {
+                return Err(AppError::Invalid(
+                    "MLX directory is missing config.json".into(),
+                ));
+            }
+        }
+    }
+
+    let slug = slugify(&display_name);
+    if slug.is_empty() {
+        return Err(AppError::Invalid("display_name produced empty slug".into()));
+    }
+
+    let app_dir = {
+        let reg = state.registry.lock().await;
+        reg.app_dir.clone()
+    };
+
+    let dest_dir = app_dir
+        .join("models")
+        .join(runtime.folder_name())
+        .join("imported")
+        .join(&slug);
+    tokio::fs::create_dir_all(&dest_dir).await?;
+
+    let (hf_file_value, dest_path) = if is_dir {
+        copy_dir(src, &dest_dir).await?;
+        ("*".to_string(), dest_dir.clone())
+    } else {
+        let filename = src
+            .file_name()
+            .and_then(|n| n.to_str())
+            .ok_or_else(|| AppError::Invalid("source filename not utf8".into()))?
+            .to_string();
+        let dest = dest_dir.join(&filename);
+        tokio::fs::copy(src, &dest).await?;
+        (filename, dest)
+    };
+
+    let size_gb = dir_size_bytes(&dest_path).await as f32 / 1_073_741_824.0;
+
+    let model = Model {
+        id: format!("imported-{slug}-{}", runtime.folder_name()),
+        display_name,
+        family: crate::core::ModelFamily::Other,
+        arch: crate::core::Arch::Dense,
+        modalities: vec![crate::core::Modality::Text],
+        quant: crate::core::Quant::Other,
+        ctx_max: 4096,
+        bindings: vec![crate::core::RuntimeBinding {
+            runtime,
+            hf_repo: format!("imported/{slug}"),
+            hf_file: hf_file_value,
+            size_gb,
+            available: true,
+            sha256: None,
+        }],
+        local: Default::default(),
+    };
+
+    let mut reg = state.registry.lock().await;
+    reg.add_imported(model.clone()).map_err(AppError::Io)?;
+    reg.refresh_local_state();
+    Ok(model)
+}
+
+fn slugify(s: &str) -> String {
+    s.chars()
+        .map(|c| {
+            if c.is_ascii_alphanumeric() {
+                c.to_ascii_lowercase()
+            } else {
+                '-'
+            }
+        })
+        .collect::<String>()
+        .split('-')
+        .filter(|p| !p.is_empty())
+        .collect::<Vec<_>>()
+        .join("-")
+}
+
+async fn copy_dir(src: &std::path::Path, dst: &std::path::Path) -> AppResult<()> {
+    use tokio::fs;
+    let mut stack = vec![(src.to_path_buf(), dst.to_path_buf())];
+    while let Some((cur_src, cur_dst)) = stack.pop() {
+        fs::create_dir_all(&cur_dst).await?;
+        let mut rd = fs::read_dir(&cur_src).await?;
+        while let Some(entry) = rd.next_entry().await? {
+            let p = entry.path();
+            let target = cur_dst.join(entry.file_name());
+            if entry.file_type().await?.is_dir() {
+                stack.push((p, target));
+            } else {
+                fs::copy(&p, &target).await?;
+            }
+        }
+    }
+    Ok(())
+}
+
+async fn dir_size_bytes(p: &std::path::Path) -> u64 {
+    use tokio::fs;
+    if let Ok(md) = fs::metadata(p).await {
+        if md.is_file() {
+            return md.len();
+        }
+    }
+    let mut total: u64 = 0;
+    let mut stack = vec![p.to_path_buf()];
+    while let Some(d) = stack.pop() {
+        let mut rd = match fs::read_dir(&d).await {
+            Ok(r) => r,
+            Err(_) => continue,
+        };
+        while let Ok(Some(e)) = rd.next_entry().await {
+            let p = e.path();
+            match e.file_type().await {
+                Ok(t) if t.is_dir() => stack.push(p),
+                Ok(_) => {
+                    if let Ok(md) = e.metadata().await {
+                        total += md.len();
+                    }
+                }
+                Err(_) => {}
+            }
+        }
+    }
+    total
+}
+
 /* ---------- conversations ---------- */
 
 #[tauri::command]
@@ -197,7 +375,7 @@ pub struct RuntimeStatus {
 #[tauri::command]
 pub async fn runtime_status(state: State<'_, AppState>) -> AppResult<Vec<RuntimeStatus>> {
     let mut out = Vec::new();
-    for id in [RuntimeId::LlamaCpp, RuntimeId::LiteRtLm] {
+    for id in RuntimeId::all() {
         let r = state.runtime(id);
         out.push(RuntimeStatus {
             runtime: id,

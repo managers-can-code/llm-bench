@@ -5,7 +5,13 @@ import {
   startChatTurn,
   onChatChunk,
 } from "../lib/ipc";
-import type { Model, Message, RuntimeId } from "../lib/types";
+import {
+  ALL_RUNTIMES,
+  RUNTIME_LABELS,
+  type Model,
+  type Message,
+  type RuntimeId,
+} from "../lib/types";
 
 interface Bubble {
   role: "user" | "assistant";
@@ -138,18 +144,15 @@ export default function ChatPage() {
           onChange={(e) => setRuntime(e.target.value as RuntimeId)}
           disabled={!selectedModel}
         >
-          <option
-            value="llama_cpp"
-            disabled={!supportedRuntimes.includes("llama_cpp")}
-          >
-            llama.cpp
-          </option>
-          <option
-            value="litert_lm"
-            disabled={!supportedRuntimes.includes("litert_lm")}
-          >
-            LiteRT-LM
-          </option>
+          {ALL_RUNTIMES.map((rt) => (
+            <option
+              key={rt}
+              value={rt}
+              disabled={!supportedRuntimes.includes(rt)}
+            >
+              {RUNTIME_LABELS[rt]}
+            </option>
+          ))}
         </select>
 
         <span className="text-zinc-500 text-xs">

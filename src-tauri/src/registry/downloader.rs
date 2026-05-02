@@ -49,6 +49,12 @@ pub async fn download(
         )));
     }
 
+    // Directory-mode (e.g. MLX repos): list every file in the repo and pull
+    // it sequentially into `dest/<filename>`.
+    if binding.hf_file == "*" {
+        return download_repo_tree(app, model_id, binding, dest).await;
+    }
+
     if let Some(parent) = dest.parent() {
         fs::create_dir_all(parent).await?;
     }
@@ -215,4 +221,93 @@ pub fn dest_for(app_dir: &Path, b: &RuntimeBinding) -> PathBuf {
         .join(b.runtime.folder_name())
         .join(&b.hf_repo)
         .join(&b.hf_file)
+}
+
+/// Directory-mode download: fetch every file in an HF repo into `dest/`.
+/// Used for MLX repos (and potentially other multi-file model formats).
+async fn download_repo_tree(
+    app: &AppHandle,
+    model_id: &str,
+    binding: &RuntimeBinding,
+    dest: &Path,
+) -> AppResult<()> {
+    fs::create_dir_all(dest).await?;
+
+    let api_url = format!("https://huggingface.co/api/models/{}", binding.hf_repo);
+    let client = reqwest::Client::builder()
+        .timeout(std::time::Duration::from_secs(60))
+        .build()?;
+    let resp = client.get(&api_url).send().await?;
+    if !resp.status().is_success() {
+        return Err(AppError::Invalid(format!(
+            "HF API returned {} for {}",
+            resp.status(),
+            api_url
+        )));
+    }
+    let info: HfRepoInfo = resp.json().await?;
+
+    // Filter out files that aren't part of the model itself (.gitattributes, README.md).
+    // Keep weights, tokenizer, config, and any *.json metadata.
+    let files: Vec<_> = info
+        .siblings
+        .into_iter()
+        .filter(|s| !is_repo_metadata(&s.rfilename))
+        .collect();
+
+    if files.is_empty() {
+        return Err(AppError::Invalid(format!(
+            "no model files found in {}",
+            binding.hf_repo
+        )));
+    }
+
+    for (idx, f) in files.iter().enumerate() {
+        let file_dest = dest.join(&f.rfilename);
+        if let Some(parent) = file_dest.parent() {
+            fs::create_dir_all(parent).await?;
+        }
+        // Build a per-file binding so we can reuse single-file download path.
+        let single = RuntimeBinding {
+            runtime: binding.runtime,
+            hf_repo: binding.hf_repo.clone(),
+            hf_file: f.rfilename.clone(),
+            size_gb: 0.0, // unknown; UI will show indeterminate progress
+            available: true,
+            sha256: None,
+        };
+        tracing::info!("[{}/{}] fetching {}", idx + 1, files.len(), f.rfilename);
+        Box::pin(download(app, model_id, &single, &file_dest)).await?;
+    }
+
+    emit(
+        app,
+        DownloadProgress {
+            model_id: model_id.into(),
+            runtime: binding.runtime,
+            bytes_done: 1,
+            bytes_total: 1,
+            state: DownloadState::Done,
+            error: None,
+        },
+    );
+    Ok(())
+}
+
+fn is_repo_metadata(filename: &str) -> bool {
+    matches!(
+        filename,
+        ".gitattributes" | ".gitignore" | "LICENSE" | "LICENSE.md" | "NOTICE"
+    ) || filename.starts_with("README")
+}
+
+#[derive(serde::Deserialize)]
+struct HfRepoInfo {
+    #[serde(default)]
+    siblings: Vec<HfSibling>,
+}
+
+#[derive(serde::Deserialize)]
+struct HfSibling {
+    rfilename: String,
 }

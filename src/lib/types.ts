@@ -2,7 +2,15 @@
 // Keep this file in sync with the #[derive(Serialize)] structs there.
 // (A future task is to autogenerate this with `ts-rs`.)
 
-export type RuntimeId = "llama_cpp" | "litert_lm";
+export type RuntimeId = "llama_cpp" | "litert_lm" | "mlx";
+
+export const ALL_RUNTIMES: RuntimeId[] = ["llama_cpp", "litert_lm", "mlx"];
+
+export const RUNTIME_LABELS: Record<RuntimeId, string> = {
+  llama_cpp: "llama.cpp",
+  litert_lm: "LiteRT-LM",
+  mlx: "MLX",
+};
 
 export type Arch =
   | { kind: "dense" }
