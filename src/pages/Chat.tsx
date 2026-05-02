@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { Link } from "react-router-dom";
-import { History, Plus, Settings2, X as XIcon } from "lucide-react";
+import { History, Plus, Settings2, Square, X as XIcon } from "lucide-react";
 import {
   listModels,
   createConversation,
@@ -211,6 +211,23 @@ export default function ChatPage() {
     setTurnStatus("idle");
   };
 
+  // Optimistic client-side stop. The backend cancel_chat command is a stub
+  // (returns NotImplemented), so chunks may keep arriving in the background;
+  // we mark the bubble done locally so the UI flips to idle immediately.
+  // v0.4: wire real cancellation via an abort handle on the server side.
+  const handleStop = () => {
+    setBubbles((prev) => {
+      const next = [...prev];
+      const last = next[next.length - 1];
+      if (last && last.role === "assistant" && last.status !== "done") {
+        if (!last.text) last.text = "[stopped]";
+        last.status = "done";
+      }
+      return next;
+    });
+    setTurnStatus("idle");
+  };
+
   // Chat-specific shortcuts.
   useShortcuts(
     [
@@ -283,29 +300,27 @@ export default function ChatPage() {
             onChange={(e) => setModelId(e.target.value)}
           >
             {models.length === 0 && <option value="">(no models)</option>}
-            {models.map((m) => (
-              <option key={m.id} value={m.id}>
-                {m.display_name}
-              </option>
-            ))}
+            {models.map((m) => {
+              const archLabel =
+                m.arch.kind === "moe"
+                  ? `MoE ${m.arch.active_b}B/${m.arch.total_b}B`
+                  : "dense";
+              const sizeGb = m.bindings[0]?.size_gb;
+              return (
+                <option key={m.id} value={m.id}>
+                  {m.display_name} — {archLabel}, {m.quant}
+                  {sizeGb ? `, ${sizeGb.toFixed(1)} GB` : ""}
+                </option>
+              );
+            })}
           </select>
 
-          <select
-            className="bg-zinc-900 border border-zinc-800 rounded px-2 py-1 text-sm disabled:opacity-50"
+          <RuntimeToggle
             value={runtime}
-            onChange={(e) => setRuntime(e.target.value as RuntimeId)}
+            supported={supportedRuntimes}
+            onChange={setRuntime}
             disabled={!selectedModel}
-          >
-            {ALL_RUNTIMES.map((rt) => (
-              <option
-                key={rt}
-                value={rt}
-                disabled={!supportedRuntimes.includes(rt)}
-              >
-                {RUNTIME_LABELS[rt]}
-              </option>
-            ))}
-          </select>
+          />
 
           <StatusPill status={turnStatus} />
 
@@ -379,19 +394,29 @@ export default function ChatPage() {
                 }
               }}
             />
-            <button
-              type="button"
-              onClick={send}
-              disabled={
-                !input.trim() ||
-                turnStatus === "thinking" ||
-                turnStatus === "streaming" ||
-                turnStatus === "loading_model"
-              }
-              className="bg-zinc-100 text-zinc-900 text-sm font-medium px-4 py-2 rounded disabled:opacity-40"
-            >
-              Send
-            </button>
+            {turnStatus === "thinking" ||
+            turnStatus === "streaming" ||
+            turnStatus === "loading_model" ? (
+              <button
+                type="button"
+                onClick={handleStop}
+                aria-label="Stop generating"
+                title="Stop generating"
+                className="bg-zinc-200 text-zinc-900 text-sm font-medium px-4 py-2 rounded inline-flex items-center gap-1.5 hover:bg-white"
+              >
+                <Square size={12} fill="currentColor" />
+                Stop
+              </button>
+            ) : (
+              <button
+                type="button"
+                onClick={send}
+                disabled={!input.trim()}
+                className="bg-zinc-100 text-zinc-900 text-sm font-medium px-4 py-2 rounded disabled:opacity-40 hover:bg-white"
+              >
+                Send
+              </button>
+            )}
           </div>
         </footer>
       </div>
@@ -430,6 +455,48 @@ export default function ChatPage() {
           </div>
         </aside>
       )}
+    </div>
+  );
+}
+
+interface RuntimeToggleProps {
+  value: RuntimeId;
+  supported: RuntimeId[];
+  onChange: (rt: RuntimeId) => void;
+  disabled: boolean;
+}
+
+function RuntimeToggle({
+  value,
+  supported,
+  onChange,
+  disabled,
+}: RuntimeToggleProps) {
+  return (
+    <div className="inline-flex items-center rounded-md border border-zinc-800 bg-zinc-900 p-0.5">
+      {ALL_RUNTIMES.map((rt) => {
+        const ok = supported.includes(rt);
+        const active = value === rt;
+        return (
+          <button
+            key={rt}
+            type="button"
+            onClick={() => ok && onChange(rt)}
+            disabled={disabled || !ok}
+            title={ok ? RUNTIME_LABELS[rt] : `${RUNTIME_LABELS[rt]} not available for this model`}
+            className={[
+              "text-xs px-2 py-1 rounded",
+              active && ok
+                ? "bg-zinc-700 text-zinc-100"
+                : ok
+                  ? "text-zinc-300 hover:text-zinc-100"
+                  : "text-zinc-600 cursor-not-allowed",
+            ].join(" ")}
+          >
+            {RUNTIME_LABELS[rt]}
+          </button>
+        );
+      })}
     </div>
   );
 }
@@ -683,7 +750,7 @@ function BubbleView({ bubble }: BubbleViewProps) {
   if (isUser) {
     return (
       <div className="flex justify-end">
-        <div className="max-w-2xl rounded-2xl rounded-tr-sm bg-zinc-100 text-zinc-900 px-4 py-2.5 text-sm leading-relaxed whitespace-pre-wrap">
+        <div className="max-w-2xl rounded-2xl rounded-tr-sm bg-zinc-800 text-zinc-100 border border-zinc-700 px-4 py-2.5 text-sm leading-relaxed whitespace-pre-wrap">
           {bubble.text}
         </div>
       </div>
@@ -726,6 +793,19 @@ function BubbleView({ bubble }: BubbleViewProps) {
   );
 }
 
+const STATS_TOOLTIPS: Record<string, string> = {
+  hw: "Hardware backend the runtime used for this turn.",
+  ttft:
+    "Time to first token — wall-clock from sending the request until the first token streamed back.",
+  prefill:
+    "Prompt-processing speed in tokens per second (parallel prefill phase).",
+  decode:
+    "Generation speed in tokens per second during the decode phase, after prefill.",
+  total:
+    "Total wall-clock time for the turn, including model load if it wasn't already warm.",
+  out: "Number of completion tokens the model generated.",
+};
+
 function StatsFooter({ metrics }: { metrics: RuntimeMetrics }) {
   const items: Array<[string, string]> = [];
   if (metrics.hardware) items.push(["hw", metrics.hardware]);
@@ -753,9 +833,9 @@ function StatsFooter({ metrics }: { metrics: RuntimeMetrics }) {
   if (items.length === 0) return null;
 
   return (
-    <div className="flex flex-wrap gap-x-3 gap-y-1 text-[10px] text-zinc-400 mt-1 px-1 font-mono">
+    <div className="flex flex-wrap gap-x-3 gap-y-1 text-[11px] text-zinc-400 mt-1 px-1 font-mono">
       {items.map(([k, v]) => (
-        <span key={k}>
+        <span key={k} title={STATS_TOOLTIPS[k] ?? ""}>
           <span className="text-zinc-500">{k}</span>{" "}
           <span className="text-zinc-400 tabular-nums">{v}</span>
         </span>
