@@ -8,7 +8,7 @@ on:
 
 jobs:
   frontend:
-    name: Frontend (typecheck + build)
+    name: Frontend (typecheck + test + build)
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -19,8 +19,31 @@ jobs:
         run: npm install
       - name: Typecheck
         run: npm run typecheck
+      - name: Test
+        run: npm test
       - name: Build
         run: npm run build
+
+  rust-test:
+    name: Rust (cargo test)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+      - uses: dtolnay/rust-toolchain@stable
+      - name: Install Linux deps
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libwebkit2gtk-4.1-dev libgtk-3-dev libayatana-appindicator3-dev librsvg2-dev libsoup-3.0-dev
+      - name: Install JS deps + build dist
+        run: |
+          npm install
+          npm run build
+      - name: cargo test
+        working-directory: src-tauri
+        run: cargo test --all-targets
 
   rust-check:
     name: Rust (cargo check + clippy)
