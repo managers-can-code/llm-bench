@@ -164,13 +164,13 @@ impl Runtime for LiteRtLmRuntime {
             .take()
             .ok_or_else(|| AppError::Other(anyhow::anyhow!("no stdout from litert-lm")))?;
         let reader = BufReader::new(stdout);
-        let mut lines = reader.lines();
+        let lines = reader.lines();
 
         // Stream stdout line-by-line. Each line becomes a chunk; the final
         // chunk is emitted with done=true after the process exits.
         let s = stream::unfold(
             (lines, child, false),
-            |(mut lines, mut child, mut finished)| async move {
+            |(mut lines, mut child, finished)| async move {
                 if finished {
                     return None;
                 }
@@ -184,7 +184,6 @@ impl Runtime for LiteRtLmRuntime {
                         Some((Ok(chunk), (lines, child, false)))
                     }
                     Ok(None) => {
-                        finished = true;
                         // Wait on the child; surface non-zero exits as errors.
                         let status = child.wait().await.ok();
                         let chunk = match status {
