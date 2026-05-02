@@ -1,169 +1,190 @@
 # llm-bench
 
-Desktop app for running open-weight LLMs on **llama.cpp** and **LiteRT-LM**, with chat, evals, benchmarks, and side-by-side comparison. Modeled on Ollama's spirit but scoped to these two runtimes.
+A desktop app that runs open-weight LLMs **on your own machine**, across three different inference engines, so you can chat with them and compare them.
 
-> **Status:** v0.1 walking skeleton. The app launches, the frontend renders, the IPC layer is wired, and the llama.cpp adapter spawns `llama-server` and streams real tokens. Many features are stubbed — see [PLAN.md](./PLAN.md).
+```
+┌─────────────────────────────────────────────────────────────┐
+│  Sidebar    │  Chat                                         │
+│  ─────────  │  ──────────────────────────────────────────── │
+│  • Chat     │  [model ▾]  [runtime ▾]  ⏱ ⚙ + New chat      │
+│  • Models   │                                               │
+│  • Evals    │           ┌─────────────────────┐ Hello       │
+│  • Bench    │           └─────────────────────┘             │
+│  • Compare  │   assistant gemma-4-e2b llama.cpp             │
+│             │   ┌────────────────────────────────────────┐  │
+│             │   │ Hi! How can I help you today?          │  │
+│             │   └────────────────────────────────────────┘  │
+│             │   hw llama.cpp · Metal  ttft 124ms            │
+│             │   prefill 41 tok/s  decode 75 tok/s           │
+└─────────────────────────────────────────────────────────────┘
+```
 
-## What's in v0.1
+**What you can do today:**
+- Chat with Gemma 4 and Qwen models that fit on a laptop
+- Switch between three runtimes: **llama.cpp**, **MLX**, and **LiteRT-LM** — same model, different engines
+- See real performance numbers under each response (time-to-first-token, tokens-per-second, hardware used)
+- Tune temperature, top-p, top-k, max-tokens via a side panel
+- Save and load past conversations
+- Pause/resume model downloads
+- Bring your own model files (any `.gguf`, `.litertlm`, or MLX directory)
 
-- Tauri + Rust + React app shell with sidebar nav (Chat, Models, Evals, Benchmarks, Compare)
-- `Runtime` trait with two adapters:
-  - **llama.cpp** — spawns `llama-server`, talks OpenAI-compat HTTP, streams tokens via SSE
-  - **LiteRT-LM** — stub; greyed out until `.litertlm` builds for our 26B+ models exist
-- Model registry seeded with int4 builds of:
-  - Gemma 4 26B-A4B (MoE)
-  - Gemma 4 31B (dense)
-  - Qwen 3.6 27B (dense)
-  - Qwen 3.6 35B-A3B (MoE)
-- HF Hub downloader (resumable, sha-verified, progress events)
-- SQLite-backed conversation persistence
-- Stub pages for Evals + Benchmarks + Compare with their full plans linked
-- GitHub Actions CI for typecheck, `cargo check`, `clippy`, and per-OS builds
+**Coming later:** automated evals (MMLU, BFCL, τ-Bench, SWE-bench), benchmark suite, side-by-side compare. See [PLAN.md](./PLAN.md).
 
-## What's *not* yet in v0.1
+---
 
-- Multimodal chat (vision/audio attach disabled in UI)
-- Eval runs (MMLU / BFCL / τ-Bench / SWE-bench harnesses)
-- Benchmark engine (TTFT, tok/s, peak memory, energy)
-- Side-by-side compare
-- Runtime auto-installer (you supply `llama-server` yourself for now)
+## Get it running in 3 steps
 
-The rest of the roadmap lives in [PLAN.md §13](./PLAN.md#13-roadmap-beyond-v01).
+> Designed for macOS first; Linux + Windows work via CI but haven't been hand-tested yet.
 
-## Build & run
+### Step 1 — install the things
 
-### Prerequisites
+You need:
+- **Node 20+** and **npm**
+- **Rust** (stable) — install from [rustup.rs](https://rustup.rs/) if you don't have it
+- One or more **runtime binaries** (next section)
 
-- **Node 20+** and **npm 10+**
-- **Rust stable 1.77+** with `cargo`
-- macOS / Linux / Windows
-- Linux only: `libwebkit2gtk-4.1-dev libgtk-3-dev libayatana-appindicator3-dev librsvg2-dev libsoup-3.0-dev`
-- Tauri requires icon files; generate them once with:
-  ```bash
-  npm run tauri icon path/to/source.png
-  ```
-
-### Development
-
+On macOS the easiest way:
 ```bash
-git clone git@github.com:managers-can-code/llm-bench.git
-cd llm-bench
-npm install
-npm run tauri:dev
+# Node
+brew install node
+
+# Rust
+curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh
+
+# Restart your shell or run:
+source "$HOME/.cargo/env"
 ```
 
-Or, frontend-only iteration without the Tauri shell:
+### Step 2 — install at least one runtime
 
+You need **at least one** of these on your machine. Each runs models a bit differently and you can pick whichever you want at chat time. Install the ones you're curious about.
+
+**llama.cpp** (best general-purpose, lots of model support):
 ```bash
-npm run dev
-```
-
-### Production build
-
-```bash
-npm run tauri:build
-```
-
-Output: `src-tauri/target/release/bundle/{dmg,deb,appimage,msi}/`.
-
-## Runtimes — bring your own (for now)
-
-The app expects runtime binaries here:
-
-```
-~/.llm-bench/runtimes/llama_cpp/llama-server
-~/.llm-bench/runtimes/litert_lm/litert-lm
-```
-
-Until v0.2 ships an auto-installer, build them yourself.
-
-### llama.cpp
-
-```bash
-git clone https://github.com/ggml-org/llama.cpp
-cd llama.cpp
-# Pick the right backend for your machine. Examples:
-cmake -B build -DGGML_METAL=ON         # Apple Silicon
-cmake -B build -DGGML_CUDA=ON          # NVIDIA (avoid CUDA 13.2 — known gibberish bug)
-cmake -B build -DGGML_VULKAN=ON        # Linux/Windows portable
+git clone https://github.com/ggml-org/llama.cpp ~/code/llama.cpp
+cd ~/code/llama.cpp
+cmake -B build -DGGML_METAL=ON       # Apple Silicon
+# OR: cmake -B build -DGGML_CUDA=ON  # NVIDIA Linux/Windows (NOT CUDA 13.2)
 cmake --build build --config Release -j --target llama-server
 mkdir -p ~/.llm-bench/runtimes/llama_cpp
 cp build/bin/llama-server ~/.llm-bench/runtimes/llama_cpp/
 ```
 
-> **CUDA caveat:** llama.cpp + CUDA 13.2 produces gibberish output on Blackwell GPUs. Pin to ≤ 13.1 or ≥ 13.3 — see [llama.cpp#21371](https://github.com/ggml-org/llama.cpp/issues/21371).
-
-### LiteRT-LM
-
-Follow [Google AI Edge's LiteRT-LM CLI guide](https://ai.google.dev/edge/litert-lm/cli). The CLI binary should land at `~/.llm-bench/runtimes/litert_lm/litert-lm`.
-
-## Models
-
-Pull from the **Models** tab in the app. Files land at:
-
-```
-~/.llm-bench/models/<runtime>/<hf_repo>/<file>
+**MLX** (fastest on Apple Silicon, Mac only):
+```bash
+# Install uv (a modern Python tool runner)
+curl -LsSf https://astral.sh/uv/install.sh | sh
+# Open a fresh terminal, then:
+uv tool install mlx-lm
+which mlx_lm.server          # should print a path
 ```
 
-Default int4 quants (UD-Q4_K_XL where Unsloth provides them):
-
-| Model | HF repo (llama.cpp / GGUF) |
-|---|---|
-| Gemma 4 26B-A4B | `unsloth/gemma-4-26B-A4B-it-GGUF` |
-| Gemma 4 31B | `unsloth/gemma-4-31B-it-GGUF` |
-| Qwen 3.6 27B | `unsloth/Qwen3.6-27B-GGUF` |
-| Qwen 3.6 35B-A3B | `unsloth/Qwen3.6-35B-A3B-GGUF` |
-
-LiteRT-LM packages for these sizes aren't on Hugging Face yet — those rows are visibly greyed out as **build pending**.
-
-## Project layout
-
-```
-llm-bench/
-├── PLAN.md                 # full architecture + roadmap
-├── README.md
-├── package.json            # Vite + React frontend
-├── src/
-│   ├── lib/
-│   │   ├── ipc.ts          # typed wrappers around invoke()
-│   │   └── types.ts        # mirror of Rust core types
-│   ├── pages/              # Chat, Models, Evals, Benchmarks, Compare
-│   └── components/Sidebar.tsx
-└── src-tauri/
-    ├── Cargo.toml
-    ├── tauri.conf.json
-    └── src/
-        ├── lib.rs          # AppState + Tauri builder
-        ├── commands.rs     # Tauri command handlers (IPC surface)
-        ├── core/           # Model, Conversation, paths, types
-        ├── runtimes/       # Runtime trait + llamacpp + litertlm
-        ├── registry/       # seed.json + downloader
-        ├── store/          # SQLite + schema.sql
-        ├── evals/          # stub
-        └── bench/          # stub
+**LiteRT-LM** (Google's edge runtime):
+```bash
+uv tool install litert-lm
+which litert-lm              # should print a path
 ```
 
-## Publishing this repo to GitHub
+The app finds these automatically — no PATH gymnastics needed. You can install one, two, or all three.
 
-The remote isn't created yet. Either:
+### Step 3 — clone, build, and run
 
 ```bash
-# option A — gh CLI
-gh repo create managers-can-code/llm-bench --public --source=. \
-  --remote=origin --push --description "Local LLM runner across llama.cpp and LiteRT-LM"
+git clone https://github.com/managers-can-code/llm-bench
+cd llm-bench
+npm install
+npm run tauri:dev
+```
 
-# option B — create empty repo on github.com first, then:
-git init
-git remote add origin git@github.com:managers-can-code/llm-bench.git
-git add .
-git commit -m "v0.1 walking skeleton"
-git push -u origin main
+The first build takes 2–3 minutes (Rust compiles a lot of dependencies). Subsequent runs are seconds. A window will open titled **llm-bench**.
+
+---
+
+## First chat
+
+1. Click **Models** in the sidebar.
+2. Find a row you can fit on your machine. **Gemma 4 E2B** is ~2.5 GB and works almost anywhere.
+3. Click **download** under whichever runtime you have installed. Wait for the progress bar to hit 100%.
+4. Click **Chat** in the sidebar.
+5. Pick the model and runtime you just installed.
+6. Type "hello" and press Enter.
+
+You should see tokens stream in. Under the response you'll see a small footer with timing data — that's how the runtimes will be compared once the Benchmarks page lights up later.
+
+---
+
+## Bring your own model
+
+Got a `.gguf` file or an MLX-quantized directory you want to test? Click **+ Import model** on the Models page. The dialog lets you pick:
+- A `.gguf` file → registered for **llama.cpp**
+- A `.litertlm` file → registered for **LiteRT-LM**
+- A directory containing `config.json` + safetensors + tokenizer → registered for **MLX**
+
+The file gets copied into `~/.llm-bench/models/<runtime>/imported/<your-name>/` and shows up as a row you can chat with.
+
+---
+
+## Where things live
+
+```
+~/.llm-bench/
+├── store.sqlite          ← your conversations
+├── imported.json         ← models you imported yourself
+├── models/
+│   ├── llama_cpp/        ← .gguf files
+│   ├── mlx/              ← MLX directories
+│   └── litert_lm/        ← .litertlm files
+├── runtimes/             ← optional vendored binaries
+│   ├── llama_cpp/llama-server
+│   ├── mlx/mlx_lm.server
+│   └── litert_lm/litert-lm
+└── logs/
+```
+
+---
+
+## Troubleshooting (the issues real users hit)
+
+**"runtime not available: llama-server not installed at ..."**
+→ Step 2 of "First time setup" hasn't finished. Make sure the binary actually exists at the path the error mentions.
+
+**"No such option: --model"** (LiteRT-LM)
+→ Your `litert-lm` is probably a different version with different flags. Run `litert-lm run -h` and tell us; we'll add support for your CLI.
+
+**MLX chat says "Model type gemma4 not supported"**
+→ Your `mlx-lm` is too old (< 0.30). It needs Python 3.10+. The simplest fix is `uv tool install --upgrade mlx-lm` — uv ships its own Python so this avoids macOS's `libexpat` issue.
+
+**The 26B+ models OOM when I try to chat**
+→ Big MoE models (Gemma 4 26B-A4B) need expert-tensor offload to fit on consumer GPUs. The app does this automatically for llama.cpp but it's still tight on M-series Macs with under 24 GB. Stick with E2B / E4B / 4B variants — they're the recommended starters anyway.
+
+**Chat hangs forever on "..."**
+→ Watch the dev terminal (where `npm run tauri:dev` is running). The runtime's stdout/stderr appears there. Most hangs are model loads taking longer than expected; give it 60 seconds. If still nothing, paste the terminal output as an issue.
+
+**Downloads keep failing partway**
+→ Click pause, then resume. Resume picks up from the last byte received via HTTP Range. If it keeps failing, the underlying network is the issue — `curl -L -C -` outside the app works as a fallback.
+
+---
+
+## Going further
+
+- The full design and roadmap live in [PLAN.md](./PLAN.md). Phases 5+ cover MMLU/BFCL/τ-Bench evals, the benchmark suite, and the side-by-side compare view.
+- All code is documented inline; the parts that surprised us (MoE-CPU offload, mmap-vs-override-tensor on Apple Silicon, the StrictMode listener race that doubled tokens, etc.) are called out in commit messages and module docstrings.
+- File issues at https://github.com/managers-can-code/llm-bench/issues with the dev-terminal output and we'll dig in.
+
+## Develop on the project itself
+
+```bash
+npm test                                # vitest unit tests
+cd src-tauri && cargo test              # rust unit tests
+cd src-tauri && cargo clippy --all-targets -- -D warnings
+cd src-tauri && cargo fmt --all -- --check
+```
+
+The pre-commit hook at `.githooks/pre-commit` runs all of these before every commit. Activate it once with:
+```bash
+git config core.hooksPath .githooks
 ```
 
 ## License
 
 Apache-2.0 — see [LICENSE](./LICENSE).
-
-## Contributing
-
-Issues and PRs welcome once the repo is public. The single best contribution right now is helping the LiteRT-LM 26B+ packaging story land — see [PLAN.md §14](./PLAN.md#14-risks--open-questions).
