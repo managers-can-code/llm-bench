@@ -64,6 +64,24 @@
     ]
   },
   {
+    "id": "qwen-2-5-1-5b-mlx-starter",
+    "display_name": "Qwen 2.5 1.5B (MLX starter)",
+    "family": "other",
+    "arch": { "kind": "dense" },
+    "modalities": ["text"],
+    "quant": "other",
+    "ctx_max": 32768,
+    "bindings": [
+      {
+        "runtime": "mlx",
+        "hf_repo": "mlx-community/Qwen2.5-1.5B-Instruct-4bit",
+        "hf_file": "*",
+        "size_gb": 0.9,
+        "available": true
+      }
+    ]
+  },
+  {
     "id": "qwen-3-5-4b",
     "display_name": "Qwen 3.5 4B (instruct)",
     "family": "qwen_3_6",
