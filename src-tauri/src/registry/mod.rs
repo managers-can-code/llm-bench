@@ -97,3 +97,90 @@ pub fn file_path_for(app_dir: &Path, b: &RuntimeBinding) -> PathBuf {
         base.join(&b.hf_file)
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn seed_json_parses_into_models() {
+        let models: Vec<Model> =
+            serde_json::from_str(SEED_JSON).expect("seed.json must deserialize");
+        assert!(!models.is_empty(), "seed should have at least one model");
+        // Every binding must have non-empty repo and file fields.
+        for m in &models {
+            for b in &m.bindings {
+                assert!(!b.hf_repo.is_empty(), "{} binding missing hf_repo", m.id);
+                assert!(!b.hf_file.is_empty(), "{} binding missing hf_file", m.id);
+            }
+        }
+    }
+
+    #[test]
+    fn file_path_for_single_file() {
+        let app_dir = PathBuf::from("/tmp/llm-bench");
+        let b = RuntimeBinding {
+            runtime: RuntimeId::LlamaCpp,
+            hf_repo: "unsloth/test-GGUF".into(),
+            hf_file: "test.gguf".into(),
+            size_gb: 1.0,
+            available: true,
+            sha256: None,
+        };
+        let p = file_path_for(&app_dir, &b);
+        assert_eq!(
+            p,
+            PathBuf::from("/tmp/llm-bench/models/llama_cpp/unsloth/test-GGUF/test.gguf")
+        );
+    }
+
+    #[test]
+    fn file_path_for_directory_mode() {
+        let app_dir = PathBuf::from("/tmp/llm-bench");
+        let b = RuntimeBinding {
+            runtime: RuntimeId::Mlx,
+            hf_repo: "mlx-community/test-4bit".into(),
+            hf_file: "*".into(),
+            size_gb: 1.0,
+            available: true,
+            sha256: None,
+        };
+        let p = file_path_for(&app_dir, &b);
+        // For dir-mode, the path is the repo dir itself, no file suffix.
+        assert_eq!(
+            p,
+            PathBuf::from("/tmp/llm-bench/models/mlx/mlx-community/test-4bit")
+        );
+    }
+
+    #[test]
+    fn refresh_local_state_marks_all_bindings_absent_for_empty_dir() {
+        let tmp = tempfile_dir();
+        let mut reg = Registry::with_seed(tmp.clone());
+        reg.refresh_local_state();
+        for m in &reg.models {
+            for b in &m.bindings {
+                assert_eq!(
+                    m.local.get(&b.runtime).copied().unwrap_or(false),
+                    false,
+                    "{} ({}) should be marked absent",
+                    m.id,
+                    b.hf_repo
+                );
+            }
+        }
+    }
+
+    fn tempfile_dir() -> PathBuf {
+        let mut p = std::env::temp_dir();
+        p.push(format!(
+            "llm-bench-test-{}",
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        std::fs::create_dir_all(&p).expect("create tempdir");
+        p
+    }
+}

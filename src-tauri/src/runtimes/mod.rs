@@ -36,6 +36,52 @@ impl RuntimeId {
     }
 }
 
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn runtime_id_serde_roundtrip() {
+        for r in RuntimeId::all() {
+            let s = serde_json::to_string(&r).unwrap();
+            let back: RuntimeId = serde_json::from_str(&s).unwrap();
+            assert_eq!(r, back);
+        }
+    }
+
+    #[test]
+    fn runtime_id_wire_strings_are_stable() {
+        // These exact strings appear in seed.json, imported.json, and the
+        // TypeScript RuntimeId union. Changing them would break persisted
+        // user data and the frontend.
+        assert_eq!(
+            serde_json::to_string(&RuntimeId::LlamaCpp).unwrap(),
+            "\"llama_cpp\""
+        );
+        assert_eq!(
+            serde_json::to_string(&RuntimeId::LiteRtLm).unwrap(),
+            "\"litert_lm\""
+        );
+        assert_eq!(serde_json::to_string(&RuntimeId::Mlx).unwrap(), "\"mlx\"");
+    }
+
+    #[test]
+    fn folder_names_match_serde_strings() {
+        for r in RuntimeId::all() {
+            let serde_str = serde_json::to_string(&r)
+                .unwrap()
+                .trim_matches('"')
+                .to_string();
+            assert_eq!(
+                r.folder_name(),
+                serde_str,
+                "folder name and wire string must match for {:?}",
+                r
+            );
+        }
+    }
+}
+
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct Capabilities {
     pub modalities: Vec<Modality>,

@@ -93,3 +93,40 @@ fn chrono_now_ms() -> i64 {
         .map(|d| d.as_millis() as i64)
         .unwrap_or(0)
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn new_conversation_has_uuid_and_default_title() {
+        let c = Conversation::new("m".into(), RuntimeId::LlamaCpp, None);
+        assert!(!c.id.is_empty());
+        assert_eq!(c.title, "New chat");
+        assert_eq!(c.model_id, "m");
+        assert_eq!(c.runtime, RuntimeId::LlamaCpp);
+        assert!(c.messages.is_empty());
+        assert!(c.created_at > 0);
+        assert_eq!(c.created_at, c.updated_at);
+    }
+
+    #[test]
+    fn token_chunk_serializes_without_metrics_when_none() {
+        let c = TokenChunk {
+            text: "hi".into(),
+            done: false,
+            metrics: None,
+        };
+        let s = serde_json::to_string(&c).unwrap();
+        assert!(!s.contains("metrics"), "should skip None metrics: {}", s);
+    }
+
+    #[test]
+    fn role_serde() {
+        for r in [Role::System, Role::User, Role::Assistant] {
+            let s = serde_json::to_string(&r).unwrap();
+            let back: Role = serde_json::from_str(&s).unwrap();
+            assert_eq!(r, back);
+        }
+    }
+}
