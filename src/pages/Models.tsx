@@ -31,15 +31,13 @@ export default function ModelsPage() {
     let cancelled = false;
     let unlisten: (() => void) | undefined;
     onDownloadProgress((p) => {
+      if (cancelled) return;
       const key = `${p.model_id}::${p.runtime}`;
       setProgress((prev) => ({ ...prev, [key]: p }));
       if (p.state === "done") refresh();
     }).then((u) => {
-      if (cancelled) {
-        u();
-      } else {
-        unlisten = u;
-      }
+      if (cancelled) u();
+      else unlisten = u;
     });
     return () => {
       cancelled = true;
