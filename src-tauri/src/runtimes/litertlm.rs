@@ -32,6 +32,7 @@ impl LiteRtLmRuntime {
     }
 
     fn cli_binary(&self) -> PathBuf {
+        // 1. Explicit override.
         if let Ok(p) = std::env::var("LLM_BENCH_LITERTLM_BIN") {
             return PathBuf::from(p);
         }
@@ -40,6 +41,33 @@ impl LiteRtLmRuntime {
         } else {
             "litert-lm"
         };
+        // 2. Vendored at ~/.llm-bench/runtimes/litert_lm/<exe>.
+        let vendored = self.app_dir.join("runtimes").join("litert_lm").join(exe);
+        if vendored.exists() {
+            return vendored;
+        }
+        // 3. On $PATH.
+        if let Some(p) = which_on_path(exe) {
+            return p;
+        }
+        // 4. Common user-base bin dirs.
+        if let Some(home) = dirs::home_dir() {
+            let candidates = [
+                home.join(format!(".local/bin/{exe}")),
+                home.join(format!("Library/Python/3.13/bin/{exe}")),
+                home.join(format!("Library/Python/3.12/bin/{exe}")),
+                home.join(format!("Library/Python/3.11/bin/{exe}")),
+                home.join(format!("Library/Python/3.10/bin/{exe}")),
+                home.join(format!("Library/Python/3.9/bin/{exe}")),
+            ];
+            for c in candidates {
+                if c.exists() {
+                    return c;
+                }
+            }
+        }
+        // Fall back to vendored path so error message points users to a clear
+        // place to drop the binary.
         self.app_dir.join("runtimes").join("litert_lm").join(exe)
     }
 
@@ -293,4 +321,16 @@ fn format_prompt(msgs: &[Message]) -> String {
     }
     out.push_str("assistant:");
     out
+}
+
+/// Walk $PATH looking for an executable. Avoids depending on the `which` crate.
+fn which_on_path(name: &str) -> Option<PathBuf> {
+    let path_var = std::env::var_os("PATH")?;
+    for dir in std::env::split_paths(&path_var) {
+        let candidate = dir.join(name);
+        if candidate.is_file() {
+            return Some(candidate);
+        }
+    }
+    None
 }
