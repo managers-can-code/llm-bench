@@ -459,9 +459,12 @@ fn take_event(buf: &str) -> Option<(SseEvent, String)> {
         }
     };
 
+    // OpenAI-compat streaming sends one choice per frame. mlx_lm.server has
+    // been observed sending two choices both carrying the same delta — treating
+    // each emits every token twice. Take only choice[0].
     let mut text = String::new();
     let mut done = false;
-    for c in frame.choices {
+    if let Some(c) = frame.choices.into_iter().next() {
         if let Some(t) = c.delta.content {
             text.push_str(&t);
         }

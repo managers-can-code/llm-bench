@@ -427,7 +427,7 @@ fn take_event(buf: &str) -> Option<(SseEvent, String)> {
 
     let mut text = String::new();
     let mut done = false;
-    for c in frame.choices {
+    if let Some(c) = frame.choices.into_iter().next() {
         if let Some(t) = c.delta.content {
             text.push_str(&t);
         }
