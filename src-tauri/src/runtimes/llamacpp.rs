@@ -249,6 +249,7 @@ impl Runtime for LlamaCppRuntime {
             }),
             temperature: opts.temperature,
             top_p: opts.top_p,
+            top_k: opts.top_k,
             max_tokens: opts.max_tokens,
             seed: opts.seed,
         };
@@ -376,6 +377,8 @@ struct ChatRequest {
     temperature: Option<f32>,
     #[serde(skip_serializing_if = "Option::is_none")]
     top_p: Option<f32>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    top_k: Option<u32>,
     #[serde(skip_serializing_if = "Option::is_none")]
     max_tokens: Option<u32>,
     #[serde(skip_serializing_if = "Option::is_none")]

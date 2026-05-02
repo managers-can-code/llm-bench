@@ -4,6 +4,9 @@ import {
   createConversation,
   startChatTurn,
   onChatChunk,
+  listConversations,
+  getConversation,
+  deleteConversation as deleteConvIpc,
 } from "../lib/ipc";
 import {
   ALL_RUNTIMES,
@@ -12,6 +15,8 @@ import {
   type Message,
   type RuntimeId,
   type RuntimeMetrics,
+  type GenOpts,
+  type Conversation,
 } from "../lib/types";
 
 type TurnStatus =
@@ -21,6 +26,8 @@ type TurnStatus =
   | "streaming"
   | "done"
   | "error";
+
+type DrawerTab = "history" | "settings" | null;
 
 interface Bubble {
   role: "user" | "assistant";
@@ -32,6 +39,25 @@ interface Bubble {
   ts: number;
 }
 
+const GEN_OPTS_LS_KEY = "llm-bench:gen-opts";
+
+const DEFAULT_GEN_OPTS: GenOpts = {
+  temperature: 0.7,
+  top_p: 0.95,
+  top_k: 40,
+  max_tokens: 512,
+};
+
+function loadGenOpts(): GenOpts {
+  try {
+    const raw = localStorage.getItem(GEN_OPTS_LS_KEY);
+    if (raw) return { ...DEFAULT_GEN_OPTS, ...JSON.parse(raw) };
+  } catch {
+    /* ignore */
+  }
+  return { ...DEFAULT_GEN_OPTS };
+}
+
 export default function ChatPage() {
   const [models, setModels] = useState<Model[]>([]);
   const [modelId, setModelId] = useState<string>("");
@@ -40,9 +66,19 @@ export default function ChatPage() {
   const [bubbles, setBubbles] = useState<Bubble[]>([]);
   const [input, setInput] = useState("");
   const [turnStatus, setTurnStatus] = useState<TurnStatus>("idle");
+  const [drawer, setDrawer] = useState<DrawerTab>(null);
+  const [conversations, setConversations] = useState<Conversation[]>([]);
+  const [genOpts, setGenOpts] = useState<GenOpts>(loadGenOpts);
   const scrollRef = useRef<HTMLDivElement>(null);
-  // Track the time we sent the request so first-chunk can flip status to streaming.
-  const turnStartedAtRef = useRef<number>(0);
+
+  // Persist gen opts on change.
+  useEffect(() => {
+    try {
+      localStorage.setItem(GEN_OPTS_LS_KEY, JSON.stringify(genOpts));
+    } catch {
+      /* ignore */
+    }
+  }, [genOpts]);
 
   // Load model list on mount.
   useEffect(() => {
@@ -52,8 +88,15 @@ export default function ChatPage() {
         if (ms.length && !modelId) setModelId(ms[0].id);
       })
       .catch(() => {});
+    refreshHistory();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  const refreshHistory = () => {
+    listConversations()
+      .then(setConversations)
+      .catch(() => setConversations([]));
+  };
 
   // Subscribe to streaming chunks for the active conversation.
   useEffect(() => {
@@ -62,7 +105,6 @@ export default function ChatPage() {
     let unlisten: (() => void) | undefined;
     onChatChunk(convId, (chunk) => {
       if (cancelled) return;
-      // First chunk transitions from "thinking" → "streaming".
       setTurnStatus((prev) =>
         prev === "thinking" || prev === "loading_model" ? "streaming" : prev,
       );
@@ -87,6 +129,7 @@ export default function ChatPage() {
       });
       if (chunk.done) {
         setTurnStatus(chunk.text.startsWith("[error]") ? "error" : "done");
+        refreshHistory();
       }
     }).then((u) => {
       if (cancelled) u();
@@ -109,7 +152,6 @@ export default function ChatPage() {
     if (turnStatus === "thinking" || turnStatus === "streaming") return;
     setInput("");
     setTurnStatus("loading_model");
-    turnStartedAtRef.current = performance.now();
 
     let id = convId;
     if (!id) {
@@ -143,9 +185,7 @@ export default function ChatPage() {
     };
 
     try {
-      await startChatTurn(id!, userMsg);
-      // Once startChatTurn returns, the runtime has accepted the prompt.
-      // First chunk will flip to "streaming".
+      await startChatTurn(id!, userMsg, genOpts);
       setTurnStatus("thinking");
     } catch (e) {
       setBubbles((prev) => {
@@ -168,104 +208,432 @@ export default function ChatPage() {
     setTurnStatus("idle");
   };
 
+  const loadConversation = async (id: string) => {
+    try {
+      const conv = await getConversation(id);
+      setConvId(conv.id);
+      setModelId(conv.model_id);
+      setRuntime(conv.runtime);
+      setBubbles(
+        conv.messages
+          .filter((m) => m.role !== "system")
+          .map((m) => ({
+            role: m.role === "assistant" ? "assistant" : "user",
+            text: m.parts
+              .map((p) => (p.kind === "text" ? p.text : ""))
+              .join(""),
+            modelId: conv.model_id,
+            runtime: conv.runtime,
+            status: "done",
+            ts: m.ts ?? Date.now(),
+          })),
+      );
+      setTurnStatus("idle");
+      setDrawer(null);
+    } catch (e) {
+      alert(`could not load conversation: ${e}`);
+    }
+  };
+
+  const handleDeleteConversation = async (id: string, evt: React.MouseEvent) => {
+    evt.stopPropagation();
+    if (!confirm("Delete this conversation?")) return;
+    try {
+      await deleteConvIpc(id);
+      if (convId === id) handleNewChat();
+      refreshHistory();
+    } catch (e) {
+      alert(`delete failed: ${e}`);
+    }
+  };
+
   return (
-    <div className="h-full flex flex-col bg-zinc-950">
-      <header className="border-b border-zinc-800 px-4 py-2 flex items-center gap-3 text-sm">
-        <select
-          className="bg-zinc-900 border border-zinc-800 rounded px-2 py-1 text-sm"
-          value={modelId}
-          onChange={(e) => setModelId(e.target.value)}
-        >
-          {models.length === 0 && <option value="">(no models)</option>}
-          {models.map((m) => (
-            <option key={m.id} value={m.id}>
-              {m.display_name}
-            </option>
-          ))}
-        </select>
+    <div className="h-full flex bg-zinc-950">
+      {/* Main chat column */}
+      <div className="flex-1 flex flex-col min-w-0">
+        <header className="border-b border-zinc-800 px-4 py-2 flex items-center gap-3 text-sm">
+          <select
+            className="bg-zinc-900 border border-zinc-800 rounded px-2 py-1 text-sm"
+            value={modelId}
+            onChange={(e) => setModelId(e.target.value)}
+          >
+            {models.length === 0 && <option value="">(no models)</option>}
+            {models.map((m) => (
+              <option key={m.id} value={m.id}>
+                {m.display_name}
+              </option>
+            ))}
+          </select>
 
-        <select
-          className="bg-zinc-900 border border-zinc-800 rounded px-2 py-1 text-sm disabled:opacity-50"
-          value={runtime}
-          onChange={(e) => setRuntime(e.target.value as RuntimeId)}
-          disabled={!selectedModel}
-        >
-          {ALL_RUNTIMES.map((rt) => (
-            <option
-              key={rt}
-              value={rt}
-              disabled={!supportedRuntimes.includes(rt)}
+          <select
+            className="bg-zinc-900 border border-zinc-800 rounded px-2 py-1 text-sm disabled:opacity-50"
+            value={runtime}
+            onChange={(e) => setRuntime(e.target.value as RuntimeId)}
+            disabled={!selectedModel}
+          >
+            {ALL_RUNTIMES.map((rt) => (
+              <option
+                key={rt}
+                value={rt}
+                disabled={!supportedRuntimes.includes(rt)}
+              >
+                {RUNTIME_LABELS[rt]}
+              </option>
+            ))}
+          </select>
+
+          <StatusPill status={turnStatus} />
+
+          <div className="ml-auto flex items-center gap-1">
+            <IconButton
+              label="History"
+              active={drawer === "history"}
+              onClick={() => setDrawer(drawer === "history" ? null : "history")}
             >
-              {RUNTIME_LABELS[rt]}
-            </option>
-          ))}
-        </select>
-
-        <StatusPill status={turnStatus} />
-
-        <span className="text-zinc-500 text-xs ml-auto">
-          {selectedModel
-            ? `${selectedModel.arch.kind === "moe" ? "MoE" : "dense"} · ${selectedModel.quant}`
-            : ""}
-        </span>
-
-        <button
-          onClick={handleNewChat}
-          className="text-xs px-2 py-1 rounded border border-zinc-800 hover:border-zinc-600 text-zinc-400"
-        >
-          + New chat
-        </button>
-      </header>
-
-      <div ref={scrollRef} className="flex-1 overflow-y-auto px-6 py-6 space-y-5">
-        {bubbles.length === 0 && (
-          <div className="text-center text-zinc-600 text-sm pt-12">
-            Pick a model and runtime, then send a message.
+              ⏱
+            </IconButton>
+            <IconButton
+              label="Settings"
+              active={drawer === "settings"}
+              onClick={() =>
+                setDrawer(drawer === "settings" ? null : "settings")
+              }
+            >
+              ⚙
+            </IconButton>
+            <button
+              onClick={handleNewChat}
+              className="text-xs px-2 py-1 rounded border border-zinc-800 hover:border-zinc-600 text-zinc-400 ml-1"
+            >
+              + New chat
+            </button>
           </div>
-        )}
-        {bubbles.map((b, i) => (
-          <BubbleView key={i} bubble={b} />
-        ))}
+        </header>
+
+        <div
+          ref={scrollRef}
+          className="flex-1 overflow-y-auto px-6 py-6 space-y-5"
+        >
+          {bubbles.length === 0 && (
+            <div className="text-center text-zinc-600 text-sm pt-12">
+              Pick a model and runtime, then send a message.
+            </div>
+          )}
+          {bubbles.map((b, i) => (
+            <BubbleView key={i} bubble={b} />
+          ))}
+        </div>
+
+        <footer className="border-t border-zinc-800 p-3">
+          <div className="flex gap-2 items-end max-w-4xl mx-auto">
+            <button
+              type="button"
+              disabled
+              title="Image attach coming in v0.4"
+              className="text-xs px-2 py-2 rounded border border-zinc-800 text-zinc-600 cursor-not-allowed"
+            >
+              + image
+            </button>
+            <textarea
+              className="flex-1 bg-zinc-900 border border-zinc-800 rounded px-3 py-2 text-sm resize-none focus:outline-none focus:border-zinc-600"
+              rows={2}
+              placeholder="Ask anything…"
+              value={input}
+              onChange={(e) => setInput(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === "Enter" && !e.shiftKey) {
+                  e.preventDefault();
+                  send();
+                }
+              }}
+            />
+            <button
+              type="button"
+              onClick={send}
+              disabled={
+                !input.trim() ||
+                turnStatus === "thinking" ||
+                turnStatus === "streaming" ||
+                turnStatus === "loading_model"
+              }
+              className="bg-zinc-100 text-zinc-900 text-sm font-medium px-4 py-2 rounded disabled:opacity-40"
+            >
+              Send
+            </button>
+          </div>
+        </footer>
       </div>
 
-      <footer className="border-t border-zinc-800 p-3">
-        <div className="flex gap-2 items-end max-w-4xl mx-auto">
-          <button
-            type="button"
-            disabled
-            title="Image attach coming in v0.3"
-            className="text-xs px-2 py-2 rounded border border-zinc-800 text-zinc-600 cursor-not-allowed"
+      {/* Right drawer */}
+      {drawer && (
+        <aside className="w-72 border-l border-zinc-800 bg-zinc-950 flex flex-col">
+          <div className="px-4 py-3 border-b border-zinc-800 flex items-center justify-between">
+            <span className="text-sm font-medium">
+              {drawer === "history" ? "Chat history" : "Generation"}
+            </span>
+            <button
+              onClick={() => setDrawer(null)}
+              className="text-zinc-500 hover:text-zinc-300 text-xs"
+            >
+              close
+            </button>
+          </div>
+          <div className="flex-1 overflow-y-auto">
+            {drawer === "history" ? (
+              <HistoryDrawer
+                conversations={conversations}
+                activeId={convId}
+                onLoad={loadConversation}
+                onDelete={handleDeleteConversation}
+              />
+            ) : (
+              <GenOptsDrawer
+                opts={genOpts}
+                onChange={setGenOpts}
+                onReset={() => setGenOpts({ ...DEFAULT_GEN_OPTS })}
+              />
+            )}
+          </div>
+        </aside>
+      )}
+    </div>
+  );
+}
+
+interface IconButtonProps {
+  label: string;
+  active: boolean;
+  onClick: () => void;
+  children: React.ReactNode;
+}
+
+function IconButton({ label, active, onClick, children }: IconButtonProps) {
+  return (
+    <button
+      onClick={onClick}
+      title={label}
+      className={[
+        "w-7 h-7 rounded text-sm flex items-center justify-center border",
+        active
+          ? "bg-zinc-800 border-zinc-700 text-zinc-100"
+          : "border-zinc-800 text-zinc-400 hover:border-zinc-600 hover:text-zinc-200",
+      ].join(" ")}
+    >
+      {children}
+    </button>
+  );
+}
+
+interface HistoryDrawerProps {
+  conversations: Conversation[];
+  activeId: string | null;
+  onLoad: (id: string) => void;
+  onDelete: (id: string, evt: React.MouseEvent) => void;
+}
+
+function HistoryDrawer({
+  conversations,
+  activeId,
+  onLoad,
+  onDelete,
+}: HistoryDrawerProps) {
+  if (conversations.length === 0) {
+    return (
+      <p className="text-xs text-zinc-600 px-4 py-6">
+        No saved conversations yet.
+      </p>
+    );
+  }
+  return (
+    <ul className="px-2 py-2 space-y-0.5">
+      {conversations.map((c) => {
+        const firstUser = c.messages.find((m) => m.role === "user");
+        const subtitle = firstUser
+          ? firstUser.parts
+              .map((p) => (p.kind === "text" ? p.text : ""))
+              .join("")
+              .slice(0, 80)
+          : "(empty)";
+        const isActive = c.id === activeId;
+        return (
+          <li
+            key={c.id}
+            onClick={() => onLoad(c.id)}
+            className={[
+              "group cursor-pointer rounded px-2 py-2 text-xs",
+              isActive
+                ? "bg-zinc-800 text-zinc-100"
+                : "text-zinc-300 hover:bg-zinc-900",
+            ].join(" ")}
           >
-            + image
-          </button>
-          <textarea
-            className="flex-1 bg-zinc-900 border border-zinc-800 rounded px-3 py-2 text-sm resize-none focus:outline-none focus:border-zinc-600"
-            rows={2}
-            placeholder="Ask anything…"
-            value={input}
-            onChange={(e) => setInput(e.target.value)}
-            onKeyDown={(e) => {
-              if (e.key === "Enter" && !e.shiftKey) {
-                e.preventDefault();
-                send();
-              }
-            }}
-          />
-          <button
-            type="button"
-            onClick={send}
-            disabled={
-              !input.trim() ||
-              turnStatus === "thinking" ||
-              turnStatus === "streaming" ||
-              turnStatus === "loading_model"
-            }
-            className="bg-zinc-100 text-zinc-900 text-sm font-medium px-4 py-2 rounded disabled:opacity-40"
-          >
-            Send
-          </button>
-        </div>
-      </footer>
+            <div className="flex items-start justify-between gap-2">
+              <div className="min-w-0 flex-1">
+                <div className="font-medium truncate">{c.title}</div>
+                <div className="text-[10px] text-zinc-500 truncate">
+                  {subtitle}
+                </div>
+                <div className="text-[10px] text-zinc-600 mt-0.5">
+                  {RUNTIME_LABELS[c.runtime]} · {new Date(c.updated_at).toLocaleString()}
+                </div>
+              </div>
+              <button
+                onClick={(e) => onDelete(c.id, e)}
+                className="opacity-0 group-hover:opacity-100 text-zinc-500 hover:text-red-400 text-base leading-none"
+                title="Delete"
+              >
+                ×
+              </button>
+            </div>
+          </li>
+        );
+      })}
+    </ul>
+  );
+}
+
+interface GenOptsDrawerProps {
+  opts: GenOpts;
+  onChange: (next: GenOpts) => void;
+  onReset: () => void;
+}
+
+function GenOptsDrawer({ opts, onChange, onReset }: GenOptsDrawerProps) {
+  const set = (patch: Partial<GenOpts>) => onChange({ ...opts, ...patch });
+
+  return (
+    <div className="px-4 py-3 space-y-4 text-sm">
+      <SliderField
+        label="temperature"
+        hint="randomness — higher = more creative"
+        value={opts.temperature ?? 0.7}
+        min={0}
+        max={2}
+        step={0.05}
+        onChange={(v) => set({ temperature: v })}
+      />
+      <SliderField
+        label="top_p"
+        hint="nucleus sampling — pick from top p% of probs"
+        value={opts.top_p ?? 0.95}
+        min={0}
+        max={1}
+        step={0.01}
+        onChange={(v) => set({ top_p: v })}
+      />
+      <SliderField
+        label="top_k"
+        hint="restrict to k highest-probability tokens"
+        value={opts.top_k ?? 40}
+        min={0}
+        max={200}
+        step={1}
+        onChange={(v) => set({ top_k: Math.round(v) })}
+        integer
+      />
+      <SliderField
+        label="max_tokens"
+        hint="hard cap on response length"
+        value={opts.max_tokens ?? 512}
+        min={32}
+        max={4096}
+        step={32}
+        onChange={(v) => set({ max_tokens: Math.round(v) })}
+        integer
+      />
+      <SeedField
+        value={opts.seed}
+        onChange={(v) => set({ seed: v })}
+      />
+
+      <div className="pt-2 flex justify-between">
+        <button
+          onClick={onReset}
+          className="text-xs text-zinc-500 hover:text-zinc-300"
+        >
+          reset to defaults
+        </button>
+        <span className="text-[10px] text-zinc-600">
+          saved automatically
+        </span>
+      </div>
+    </div>
+  );
+}
+
+interface SliderFieldProps {
+  label: string;
+  hint: string;
+  value: number;
+  min: number;
+  max: number;
+  step: number;
+  integer?: boolean;
+  onChange: (v: number) => void;
+}
+
+function SliderField({
+  label,
+  hint,
+  value,
+  min,
+  max,
+  step,
+  integer,
+  onChange,
+}: SliderFieldProps) {
+  return (
+    <div>
+      <div className="flex items-baseline justify-between mb-1">
+        <label className="text-xs font-mono text-zinc-300">{label}</label>
+        <span className="text-xs tabular-nums text-zinc-500">
+          {integer ? value : value.toFixed(2)}
+        </span>
+      </div>
+      <input
+        type="range"
+        min={min}
+        max={max}
+        step={step}
+        value={value}
+        onChange={(e) => onChange(Number(e.target.value))}
+        className="w-full accent-zinc-300"
+      />
+      <p className="text-[10px] text-zinc-600 mt-0.5">{hint}</p>
+    </div>
+  );
+}
+
+interface SeedFieldProps {
+  value: number | undefined;
+  onChange: (v: number | undefined) => void;
+}
+
+function SeedField({ value, onChange }: SeedFieldProps) {
+  const [text, setText] = useState(value === undefined ? "" : String(value));
+  return (
+    <div>
+      <div className="flex items-baseline justify-between mb-1">
+        <label className="text-xs font-mono text-zinc-300">seed</label>
+        <span className="text-[10px] text-zinc-600">
+          empty = random each turn
+        </span>
+      </div>
+      <input
+        type="text"
+        inputMode="numeric"
+        value={text}
+        placeholder="(none)"
+        onChange={(e) => {
+          setText(e.target.value);
+          if (e.target.value === "") {
+            onChange(undefined);
+          } else {
+            const n = Number(e.target.value);
+            if (Number.isFinite(n)) onChange(n);
+          }
+        }}
+        className="w-full bg-zinc-900 border border-zinc-800 rounded px-2 py-1 text-xs font-mono"
+      />
     </div>
   );
 }

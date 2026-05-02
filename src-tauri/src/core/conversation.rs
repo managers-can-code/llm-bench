@@ -58,6 +58,7 @@ impl Conversation {
 pub struct GenOpts {
     pub temperature: Option<f32>,
     pub top_p: Option<f32>,
+    pub top_k: Option<u32>,
     pub max_tokens: Option<u32>,
     pub seed: Option<u64>,
 }

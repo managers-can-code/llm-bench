@@ -76,6 +76,7 @@ export interface Conversation {
 export interface GenOpts {
   temperature?: number;
   top_p?: number;
+  top_k?: number;
   max_tokens?: number;
   seed?: number;
 }
