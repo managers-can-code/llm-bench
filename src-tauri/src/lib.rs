@@ -23,11 +23,16 @@ use std::sync::Arc;
 
 use tokio::sync::Mutex;
 
+use std::collections::HashMap;
+
 use crate::registry::Registry;
 use crate::runtimes::{
     litertlm::LiteRtLmRuntime, llamacpp::LlamaCppRuntime, mlx::MlxRuntime, RuntimeId,
 };
 use crate::store::Store;
+
+/// Key identifying an in-flight download.
+pub type DownloadKey = (String, RuntimeId);
 
 /// App state held inside Tauri. Cheap to clone (Arc).
 pub struct AppState {
@@ -36,6 +41,9 @@ pub struct AppState {
     pub llama_cpp: Arc<LlamaCppRuntime>,
     pub litert_lm: Arc<LiteRtLmRuntime>,
     pub mlx: Arc<MlxRuntime>,
+    /// Active download tasks, keyed by (model_id, runtime). Holding the
+    /// JoinHandle lets us abort a running download from a separate command.
+    pub downloads: Arc<Mutex<HashMap<DownloadKey, tauri::async_runtime::JoinHandle<()>>>>,
 }
 
 impl AppState {
@@ -83,6 +91,7 @@ pub fn run() {
         llama_cpp: Arc::new(LlamaCppRuntime::new(app_dir.clone())),
         litert_lm: Arc::new(LiteRtLmRuntime::new(app_dir.clone())),
         mlx: Arc::new(MlxRuntime::new(app_dir.clone())),
+        downloads: Arc::new(Mutex::new(HashMap::new())),
     };
 
     tauri::Builder::default()
@@ -92,6 +101,7 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             commands::list_models,
             commands::download_model,
+            commands::pause_download,
             commands::delete_local_model,
             commands::import_model,
             commands::list_conversations,

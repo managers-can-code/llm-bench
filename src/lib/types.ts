@@ -101,6 +101,12 @@ export interface DownloadProgress {
   runtime: RuntimeId;
   bytes_done: number;
   bytes_total: number;
-  state: "queued" | "downloading" | "verifying" | "done" | "error";
+  state:
+    | "queued"
+    | "downloading"
+    | "paused"
+    | "verifying"
+    | "done"
+    | "error";
   error?: string;
 }

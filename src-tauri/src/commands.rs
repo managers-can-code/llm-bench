@@ -40,11 +40,81 @@ pub async fn download_model(
         (binding, dest)
     };
 
-    downloader::download(&app, &model_id, &binding, &dest).await?;
+    // Cancel any prior in-flight download for this (model, runtime).
+    {
+        let mut downloads = state.downloads.lock().await;
+        if let Some(prev) = downloads.remove(&(model_id.clone(), runtime)) {
+            prev.abort();
+        }
+    }
 
-    // Refresh local state so the UI sees the new file.
-    let mut reg = state.registry.lock().await;
-    reg.refresh_local_state();
+    // Spawn the download as a tracked task so pause_download can abort it.
+    // The function returns immediately; progress is delivered via events.
+    let app_clone = app.clone();
+    let model_id_clone = model_id.clone();
+    let downloads = state.downloads.clone();
+    let registry = state.registry.clone();
+    let key = (model_id.clone(), runtime);
+
+    let handle = tauri::async_runtime::spawn(async move {
+        let result = downloader::download(&app_clone, &model_id_clone, &binding, &dest).await;
+        if let Err(e) = &result {
+            tracing::warn!(error=%e, model_id=%model_id_clone, "download failed");
+        }
+        // Refresh local state regardless of success — partial files still
+        // affect what the UI shows.
+        let mut reg = registry.lock().await;
+        reg.refresh_local_state();
+        // Drop our handle so a future download_model invocation isn't blocked.
+        let mut downloads = downloads.lock().await;
+        downloads.remove(&(model_id_clone, runtime));
+    });
+
+    state.downloads.lock().await.insert(key, handle);
+    Ok(())
+}
+
+/// Abort an in-flight download. Partial bytes remain on disk so re-invoking
+/// `download_model` resumes via the Range header. Emits a final progress
+/// event with state=paused so the UI can swap the button to "Resume".
+#[tauri::command]
+pub async fn pause_download(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    model_id: String,
+    runtime: RuntimeId,
+) -> AppResult<()> {
+    let mut downloads = state.downloads.lock().await;
+    if let Some(handle) = downloads.remove(&(model_id.clone(), runtime)) {
+        handle.abort();
+    }
+    drop(downloads);
+
+    // Probe partial size on disk so the UI shows where it left off.
+    let bytes_done = {
+        let reg = state.registry.lock().await;
+        if let Some(b) = reg.binding_for(&model_id, runtime) {
+            let path = registry::file_path_for(&reg.app_dir, b);
+            tokio::fs::metadata(&path)
+                .await
+                .ok()
+                .map(|m| m.len())
+                .unwrap_or(0)
+        } else {
+            0
+        }
+    };
+
+    let _ = app.emit(
+        "model:download",
+        &serde_json::json!({
+            "model_id": model_id,
+            "runtime": runtime,
+            "bytes_done": bytes_done,
+            "bytes_total": 0,
+            "state": "paused",
+        }),
+    );
     Ok(())
 }
 

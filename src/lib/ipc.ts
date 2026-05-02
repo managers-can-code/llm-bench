@@ -20,6 +20,12 @@ export const downloadModel = (
 ): Promise<void> =>
   invoke("download_model", { modelId, runtime });
 
+export const pauseDownload = (
+  modelId: string,
+  runtime: RuntimeId,
+): Promise<void> =>
+  invoke("pause_download", { modelId, runtime });
+
 export const deleteLocalModel = (
   modelId: string,
   runtime: RuntimeId,

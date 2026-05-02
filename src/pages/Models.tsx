@@ -1,8 +1,9 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { open } from "@tauri-apps/plugin-dialog";
 import {
   listModels,
   downloadModel,
+  pauseDownload,
   deleteLocalModel,
   importModel,
   onDownloadProgress,
@@ -15,10 +16,17 @@ import {
   type DownloadProgress,
 } from "../lib/types";
 
+interface ProgressSample {
+  ts: number;
+  bytes: number;
+}
+
 export default function ModelsPage() {
   const [models, setModels] = useState<Model[]>([]);
   const [progress, setProgress] = useState<Record<string, DownloadProgress>>({});
   const [importOpen, setImportOpen] = useState(false);
+  // History of (timestamp, bytes_done) per download key, used for speed/ETA.
+  const samplesRef = useRef<Record<string, ProgressSample[]>>({});
 
   const refresh = () => {
     listModels()
@@ -33,8 +41,16 @@ export default function ModelsPage() {
     onDownloadProgress((p) => {
       if (cancelled) return;
       const key = `${p.model_id}::${p.runtime}`;
+      // Roll a small ring buffer of samples to compute instantaneous speed.
+      const arr = samplesRef.current[key] ?? [];
+      arr.push({ ts: Date.now(), bytes: p.bytes_done });
+      while (arr.length > 8) arr.shift();
+      samplesRef.current[key] = arr;
       setProgress((prev) => ({ ...prev, [key]: p }));
-      if (p.state === "done") refresh();
+      if (p.state === "done") {
+        delete samplesRef.current[key];
+        refresh();
+      }
     }).then((u) => {
       if (cancelled) u();
       else unlisten = u;
@@ -50,6 +66,14 @@ export default function ModelsPage() {
       await downloadModel(m.id, rt);
     } catch (e) {
       alert(`download failed: ${e}`);
+    }
+  };
+
+  const handlePause = async (m: Model, rt: RuntimeId) => {
+    try {
+      await pauseDownload(m.id, rt);
+    } catch (e) {
+      alert(`pause failed: ${e}`);
     }
   };
 
@@ -129,6 +153,7 @@ export default function ModelsPage() {
                   const local = m.local[rt];
                   const key = `${m.id}::${rt}`;
                   const prog = progress[key];
+                  const samples = samplesRef.current[key] ?? [];
                   return (
                     <td key={rt} className="px-3 py-3">
                       {!binding ? (
@@ -136,7 +161,18 @@ export default function ModelsPage() {
                       ) : !binding.available ? (
                         <span className="text-xs text-zinc-600">build pending</span>
                       ) : prog && prog.state === "downloading" ? (
-                        <ProgressBar p={prog} />
+                        <DownloadingCell
+                          p={prog}
+                          samples={samples}
+                          onPause={() => handlePause(m, rt)}
+                        />
+                      ) : prog && prog.state === "paused" ? (
+                        <button
+                          onClick={() => handleDownload(m, rt)}
+                          className="text-xs px-2 py-1 rounded border border-amber-700 text-amber-400 hover:border-amber-500"
+                        >
+                          ▶ resume · {(prog.bytes_done / 1_073_741_824).toFixed(1)} GB
+                        </button>
                       ) : local ? (
                         <button
                           onClick={() => handleDelete(m, rt)}
@@ -174,21 +210,75 @@ export default function ModelsPage() {
   );
 }
 
-function ProgressBar({ p }: { p: DownloadProgress }) {
+interface DownloadingCellProps {
+  p: DownloadProgress;
+  samples: ProgressSample[];
+  onPause: () => void;
+}
+
+function DownloadingCell({ p, samples, onPause }: DownloadingCellProps) {
   const pct = p.bytes_total
-    ? Math.round((p.bytes_done / p.bytes_total) * 100)
+    ? Math.round((p.bytes_done / Math.max(1, p.bytes_total)) * 100)
     : 0;
+
+  // Speed = (latest_bytes - oldest_bytes) / (latest_ts - oldest_ts), in B/s.
+  let speedLabel = "…";
+  let etaLabel = "";
+  if (samples.length >= 2) {
+    const first = samples[0];
+    const last = samples[samples.length - 1];
+    const dt = (last.ts - first.ts) / 1000;
+    const db = last.bytes - first.bytes;
+    if (dt > 0 && db > 0) {
+      const bps = db / dt;
+      speedLabel = formatSpeed(bps);
+      const remaining = Math.max(0, p.bytes_total - p.bytes_done);
+      if (remaining > 0 && p.bytes_total > 0) {
+        etaLabel = formatEta(remaining / bps);
+      }
+    }
+  }
+
   return (
-    <div className="text-xs">
-      <div className="text-zinc-400 mb-1">{pct}%</div>
-      <div className="h-1 w-24 bg-zinc-800 rounded overflow-hidden">
-        <div
-          className="h-full bg-zinc-300"
-          style={{ width: `${pct}%` }}
-        />
+    <div className="text-xs space-y-1 min-w-[140px]">
+      <div className="flex items-center gap-2">
+        <span className="text-zinc-300 tabular-nums">{pct}%</span>
+        <span className="text-zinc-500 tabular-nums">{speedLabel}</span>
+        {etaLabel && (
+          <span className="text-zinc-600 tabular-nums">{etaLabel}</span>
+        )}
+        <button
+          onClick={onPause}
+          title="Pause"
+          className="ml-auto text-zinc-400 hover:text-zinc-100 px-1"
+        >
+          ⏸
+        </button>
+      </div>
+      <div className="h-1 w-32 bg-zinc-800 rounded overflow-hidden">
+        <div className="h-full bg-zinc-300" style={{ width: `${pct}%` }} />
       </div>
     </div>
   );
+}
+
+function formatSpeed(bps: number): string {
+  if (bps >= 1_048_576) return `${(bps / 1_048_576).toFixed(1)} MB/s`;
+  if (bps >= 1024) return `${(bps / 1024).toFixed(1)} KB/s`;
+  return `${bps.toFixed(0)} B/s`;
+}
+
+function formatEta(seconds: number): string {
+  if (!isFinite(seconds) || seconds < 0) return "";
+  if (seconds < 60) return `${Math.round(seconds)}s`;
+  if (seconds < 3600) {
+    const m = Math.floor(seconds / 60);
+    const s = Math.round(seconds % 60);
+    return `${m}m${s.toString().padStart(2, "0")}s`;
+  }
+  const h = Math.floor(seconds / 3600);
+  const m = Math.round((seconds % 3600) / 60);
+  return `${h}h${m.toString().padStart(2, "0")}m`;
 }
 
 interface ImportDialogProps {

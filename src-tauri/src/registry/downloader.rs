@@ -20,6 +20,7 @@ use crate::runtimes::RuntimeId;
 pub enum DownloadState {
     Queued,
     Downloading,
+    Paused,
     Verifying,
     Done,
     Error,
