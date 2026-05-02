@@ -18,7 +18,7 @@ use futures::stream::{self, BoxStream, StreamExt};
 use tokio::io::{AsyncBufReadExt, BufReader};
 use tokio::process::Command;
 
-use crate::core::{GenOpts, Message, Model, Part, Role, TokenChunk};
+use crate::core::{GenOpts, Message, Model, Part, Role, RuntimeMetrics, TokenChunk};
 use crate::error::{AppError, AppResult};
 use crate::runtimes::{Capabilities, LoadOpts, Runtime, RuntimeId, SessionHandle};
 
@@ -201,46 +201,66 @@ impl Runtime for LiteRtLmRuntime {
         let reader = BufReader::new(stdout);
         let lines = reader.lines();
 
-        // Stream stdout line-by-line. Each line becomes a chunk; the final
-        // chunk is emitted with done=true after the process exits.
+        let started = std::time::Instant::now();
+
+        // Stream stdout line-by-line. We measure TTFT/total wall-clock and
+        // emit a RuntimeMetrics on the final chunk. The CLI doesn't surface
+        // token counts, so we approximate completion_tokens = chars / 4.
         let s = stream::unfold(
-            (lines, child, false),
-            |(mut lines, mut child, finished)| async move {
+            (
+                lines,
+                child,
+                false,
+                started,
+                None::<std::time::Instant>,
+                0usize,
+            ),
+            |(mut lines, mut child, finished, started, mut first_token, mut chars)| async move {
                 if finished {
                     return None;
                 }
                 match lines.next_line().await {
                     Ok(Some(line)) => {
+                        if first_token.is_none() && !line.is_empty() {
+                            first_token = Some(std::time::Instant::now());
+                        }
+                        chars += line.len() + 1;
                         let chunk = TokenChunk {
                             text: format!("{line}\n"),
                             done: false,
                             metrics: None,
                         };
-                        Some((Ok(chunk), (lines, child, false)))
+                        Some((
+                            Ok(chunk),
+                            (lines, child, false, started, first_token, chars),
+                        ))
                     }
                     Ok(None) => {
-                        // Wait on the child; surface non-zero exits as errors.
                         let status = child.wait().await.ok();
+                        let metrics = build_metrics(started, first_token, chars);
                         let chunk = match status {
                             Some(s) if s.success() => TokenChunk {
                                 text: String::new(),
                                 done: true,
-                                metrics: None,
+                                metrics: Some(metrics),
                             },
                             Some(s) => TokenChunk {
                                 text: format!("\n[litert-lm exited with status {s}]\n"),
                                 done: true,
-                                metrics: None,
+                                metrics: Some(metrics),
                             },
                             None => TokenChunk {
                                 text: "\n[litert-lm: failed to wait]\n".to_string(),
                                 done: true,
-                                metrics: None,
+                                metrics: Some(metrics),
                             },
                         };
-                        Some((Ok(chunk), (lines, child, true)))
+                        Some((Ok(chunk), (lines, child, true, started, first_token, chars)))
                     }
-                    Err(e) => Some((Err(AppError::Io(e)), (lines, child, true))),
+                    Err(e) => Some((
+                        Err(AppError::Io(e)),
+                        (lines, child, true, started, first_token, chars),
+                    )),
                 }
             },
         );
@@ -338,6 +358,41 @@ fn format_prompt(msgs: &[Message]) -> String {
     }
     out.push_str("assistant:");
     out
+}
+
+/// LiteRT-LM CLI doesn't expose token counts directly, so we approximate
+/// completion_tokens from character count using the rule of thumb of 4 chars
+/// per token. TTFT and total are measured wall-clock on our side.
+fn build_metrics(
+    started: std::time::Instant,
+    first_token: Option<std::time::Instant>,
+    chars: usize,
+) -> RuntimeMetrics {
+    let now = std::time::Instant::now();
+    let total_ms = (now - started).as_millis() as u32;
+    let ttft_ms = first_token
+        .map(|t| (t - started).as_millis() as u32)
+        .unwrap_or(0);
+    let est_completion = (chars as u32) / 4;
+    let decode = if total_ms > ttft_ms {
+        let secs = (total_ms - ttft_ms) as f32 / 1000.0;
+        if secs > 0.0 {
+            est_completion as f32 / secs
+        } else {
+            0.0
+        }
+    } else {
+        0.0
+    };
+    RuntimeMetrics {
+        tokens_per_sec_decode: decode,
+        tokens_per_sec_prefill: 0.0,
+        ttft_ms,
+        total_ms,
+        prompt_tokens: 0,
+        completion_tokens: est_completion,
+        hardware: Some("LiteRT-LM · GPU".into()),
+    }
 }
 
 /// Walk $PATH looking for an executable. Avoids depending on the `which` crate.

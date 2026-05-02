@@ -19,7 +19,7 @@ use serde::{Deserialize, Serialize};
 use tokio::process::{Child, Command};
 use tokio::sync::Mutex;
 
-use crate::core::{GenOpts, Message, Model, Part, Role, TokenChunk};
+use crate::core::{GenOpts, Message, Model, Part, Role, RuntimeMetrics, TokenChunk};
 use crate::error::{AppError, AppResult};
 use crate::runtimes::{Capabilities, LoadOpts, Runtime, RuntimeId, SessionHandle};
 
@@ -260,19 +260,19 @@ impl Runtime for MlxRuntime {
         let http = g.http.clone();
         drop(g);
 
-        // mlx_lm.server uses the literal "default_model" to refer to whatever
-        // was passed to --model at launch. Sending anything else (e.g. "local")
-        // causes the server to attempt an HF Hub lookup for that name, get 401,
-        // and 404 the chat request.
         let body = ChatRequest {
             model: "default_model".into(),
             messages: msgs.iter().map(to_oai_message).collect(),
             stream: true,
+            stream_options: Some(StreamOptions {
+                include_usage: true,
+            }),
             temperature: opts.temperature,
             top_p: opts.top_p,
             max_tokens: opts.max_tokens,
         };
 
+        let started = Instant::now();
         let resp = http.post(url).json(&body).send().await?;
         if !resp.status().is_success() {
             let status = resp.status();
@@ -284,15 +284,54 @@ impl Runtime for MlxRuntime {
 
         let byte_stream = resp.bytes_stream();
         let s = stream::unfold(
-            (byte_stream, String::new()),
-            |(mut bs, mut buf)| async move {
+            (
+                byte_stream,
+                String::new(),
+                started,
+                None::<Instant>,
+                None::<OaiUsage>,
+                false,
+            ),
+            |(mut bs, mut buf, started, mut first_token, mut pending_usage, mut final_emitted)| async move {
+                if final_emitted {
+                    return None;
+                }
                 loop {
                     if let Some((event, rest)) = take_event(&buf) {
                         buf = rest;
                         match event {
-                            SseEvent::Done => return None,
-                            SseEvent::Chunk(chunk) => {
-                                return Some((Ok(chunk), (bs, buf)));
+                            SseEvent::Done => {
+                                let metrics = pending_usage
+                                    .as_ref()
+                                    .map(|u| build_metrics(u, started, first_token));
+                                final_emitted = true;
+                                return Some((
+                                    Ok(TokenChunk {
+                                        text: String::new(),
+                                        done: true,
+                                        metrics,
+                                    }),
+                                    (bs, buf, started, first_token, pending_usage, final_emitted),
+                                ));
+                            }
+                            SseEvent::Chunk(mut chunk) => {
+                                if !chunk.text.is_empty() && first_token.is_none() {
+                                    first_token = Some(Instant::now());
+                                }
+                                if chunk.done {
+                                    chunk.metrics = pending_usage
+                                        .as_ref()
+                                        .map(|u| build_metrics(u, started, first_token));
+                                    final_emitted = true;
+                                }
+                                return Some((
+                                    Ok(chunk),
+                                    (bs, buf, started, first_token, pending_usage, final_emitted),
+                                ));
+                            }
+                            SseEvent::Usage(u) => {
+                                pending_usage = Some(u);
+                                continue;
                             }
                         }
                     }
@@ -301,7 +340,10 @@ impl Runtime for MlxRuntime {
                             buf.push_str(&String::from_utf8_lossy(&b));
                         }
                         Some(Err(e)) => {
-                            return Some((Err(AppError::Http(e)), (bs, buf)));
+                            return Some((
+                                Err(AppError::Http(e)),
+                                (bs, buf, started, first_token, pending_usage, final_emitted),
+                            ));
                         }
                         None => return None,
                     }
@@ -366,11 +408,26 @@ struct ChatRequest {
     messages: Vec<OaiMessage>,
     stream: bool,
     #[serde(skip_serializing_if = "Option::is_none")]
+    stream_options: Option<StreamOptions>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     temperature: Option<f32>,
     #[serde(skip_serializing_if = "Option::is_none")]
     top_p: Option<f32>,
     #[serde(skip_serializing_if = "Option::is_none")]
     max_tokens: Option<u32>,
+}
+
+#[derive(Serialize)]
+struct StreamOptions {
+    include_usage: bool,
+}
+
+#[derive(Clone, Copy, Debug, Default, Deserialize)]
+struct OaiUsage {
+    #[serde(default)]
+    prompt_tokens: u32,
+    #[serde(default)]
+    completion_tokens: u32,
 }
 
 #[derive(Serialize)]
@@ -381,7 +438,10 @@ struct OaiMessage {
 
 #[derive(Deserialize)]
 struct StreamFrame {
+    #[serde(default)]
     choices: Vec<StreamChoice>,
+    #[serde(default)]
+    usage: Option<OaiUsage>,
 }
 
 #[derive(Deserialize)]
@@ -419,6 +479,7 @@ fn to_oai_message(m: &Message) -> OaiMessage {
 
 enum SseEvent {
     Chunk(TokenChunk),
+    Usage(OaiUsage),
     Done,
 }
 
@@ -459,6 +520,10 @@ fn take_event(buf: &str) -> Option<(SseEvent, String)> {
         }
     };
 
+    if let Some(u) = frame.usage {
+        return Some((SseEvent::Usage(u), rest));
+    }
+
     // OpenAI-compat streaming sends one choice per frame. mlx_lm.server has
     // been observed sending two choices both carrying the same delta — treating
     // each emits every token twice. Take only choice[0].
@@ -480,4 +545,38 @@ fn take_event(buf: &str) -> Option<(SseEvent, String)> {
         }),
         rest,
     ))
+}
+
+fn build_metrics(u: &OaiUsage, started: Instant, first_token: Option<Instant>) -> RuntimeMetrics {
+    let now = Instant::now();
+    let total_ms = (now - started).as_millis() as u32;
+    let ttft_ms = first_token
+        .map(|t| (t - started).as_millis() as u32)
+        .unwrap_or(0);
+
+    let decode_secs = if total_ms > ttft_ms {
+        (total_ms - ttft_ms) as f32 / 1000.0
+    } else {
+        0.0
+    };
+    let decode = if decode_secs > 0.0 && u.completion_tokens > 0 {
+        u.completion_tokens as f32 / decode_secs
+    } else {
+        0.0
+    };
+    let prefill = if ttft_ms > 0 && u.prompt_tokens > 0 {
+        u.prompt_tokens as f32 / (ttft_ms as f32 / 1000.0)
+    } else {
+        0.0
+    };
+
+    RuntimeMetrics {
+        tokens_per_sec_decode: decode,
+        tokens_per_sec_prefill: prefill,
+        ttft_ms,
+        total_ms,
+        prompt_tokens: u.prompt_tokens,
+        completion_tokens: u.completion_tokens,
+        hardware: Some("MLX · Metal".into()),
+    }
 }

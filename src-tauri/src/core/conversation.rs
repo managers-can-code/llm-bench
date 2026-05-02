@@ -76,8 +76,12 @@ pub struct RuntimeMetrics {
     pub tokens_per_sec_decode: f32,
     pub tokens_per_sec_prefill: f32,
     pub ttft_ms: u32,
+    pub total_ms: u32,
     pub prompt_tokens: u32,
     pub completion_tokens: u32,
+    /// Free-form hardware label, e.g. "Metal", "CUDA", "CPU", "MLX/Metal".
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub hardware: Option<String>,
 }
 
 /// Lightweight wall-clock helper. We avoid pulling chrono in just for this.

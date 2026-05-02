@@ -11,6 +11,7 @@ import {
   type Model,
   type Message,
   type RuntimeId,
+  type RuntimeMetrics,
 } from "../lib/types";
 
 type TurnStatus =
@@ -27,6 +28,7 @@ interface Bubble {
   modelId?: string;
   runtime?: RuntimeId;
   status?: TurnStatus;
+  metrics?: RuntimeMetrics;
   ts: number;
 }
 
@@ -69,6 +71,7 @@ export default function ChatPage() {
         const last = next[next.length - 1];
         if (last && last.role === "assistant" && last.status !== "done") {
           last.text += chunk.text;
+          if (chunk.metrics) last.metrics = chunk.metrics;
           if (chunk.done) {
             last.status = chunk.text.startsWith("[error]") ? "error" : "done";
           } else {
@@ -312,7 +315,48 @@ function BubbleView({ bubble }: BubbleViewProps) {
             <BubblePending status={bubble.status ?? "thinking"} />
           )}
         </div>
+        {bubble.metrics && bubble.status === "done" && (
+          <StatsFooter metrics={bubble.metrics} />
+        )}
       </div>
+    </div>
+  );
+}
+
+function StatsFooter({ metrics }: { metrics: RuntimeMetrics }) {
+  const items: Array<[string, string]> = [];
+  if (metrics.hardware) items.push(["hw", metrics.hardware]);
+  if (metrics.ttft_ms) items.push(["ttft", `${metrics.ttft_ms}ms`]);
+  if (metrics.tokens_per_sec_prefill > 0)
+    items.push([
+      "prefill",
+      `${metrics.tokens_per_sec_prefill.toFixed(1)} tok/s`,
+    ]);
+  if (metrics.tokens_per_sec_decode > 0)
+    items.push([
+      "decode",
+      `${metrics.tokens_per_sec_decode.toFixed(1)} tok/s`,
+    ]);
+  if (metrics.total_ms)
+    items.push([
+      "total",
+      metrics.total_ms < 1000
+        ? `${metrics.total_ms}ms`
+        : `${(metrics.total_ms / 1000).toFixed(1)}s`,
+    ]);
+  if (metrics.completion_tokens)
+    items.push(["out", `${metrics.completion_tokens} tok`]);
+
+  if (items.length === 0) return null;
+
+  return (
+    <div className="flex flex-wrap gap-x-3 gap-y-1 text-[10px] text-zinc-500 mt-1 px-1 font-mono">
+      {items.map(([k, v]) => (
+        <span key={k}>
+          <span className="text-zinc-600">{k}</span>{" "}
+          <span className="text-zinc-400 tabular-nums">{v}</span>
+        </span>
+      ))}
     </div>
   );
 }

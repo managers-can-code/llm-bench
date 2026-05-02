@@ -15,7 +15,7 @@ use serde::{Deserialize, Serialize};
 use tokio::process::{Child, Command};
 use tokio::sync::Mutex;
 
-use crate::core::{Arch, GenOpts, Message, Model, Part, Role, TokenChunk};
+use crate::core::{Arch, GenOpts, Message, Model, Part, Role, RuntimeMetrics, TokenChunk};
 use crate::error::{AppError, AppResult};
 use crate::runtimes::{Capabilities, LoadOpts, Runtime, RuntimeId, SessionHandle};
 
@@ -244,12 +244,16 @@ impl Runtime for LlamaCppRuntime {
             model: "local".into(),
             messages: msgs.iter().map(to_oai_message).collect(),
             stream: true,
+            stream_options: Some(StreamOptions {
+                include_usage: true,
+            }),
             temperature: opts.temperature,
             top_p: opts.top_p,
             max_tokens: opts.max_tokens,
             seed: opts.seed,
         };
 
+        let started = Instant::now();
         let resp = http.post(url).json(&body).send().await?;
         if !resp.status().is_success() {
             let status = resp.status();
@@ -259,19 +263,59 @@ impl Runtime for LlamaCppRuntime {
             )));
         }
 
-        // Parse SSE: lines of `data: {...}` separated by blank lines, with
-        // a final `data: [DONE]`.
         let byte_stream = resp.bytes_stream();
+        // unfold state: (byte stream, parse buffer, started_at, ttft snapshot,
+        // pending usage frame, has-emitted-final flag).
         let s = stream::unfold(
-            (byte_stream, String::new()),
-            |(mut bs, mut buf)| async move {
+            (
+                byte_stream,
+                String::new(),
+                started,
+                None::<Instant>,
+                None::<OaiUsage>,
+                false,
+            ),
+            |(mut bs, mut buf, started, mut first_token, mut pending_usage, mut final_emitted)| async move {
+                if final_emitted {
+                    return None;
+                }
                 loop {
                     if let Some((event, rest)) = take_event(&buf) {
                         buf = rest;
                         match event {
-                            SseEvent::Done => return None,
-                            SseEvent::Chunk(chunk) => {
-                                return Some((Ok(chunk), (bs, buf)));
+                            SseEvent::Done => {
+                                let metrics = pending_usage
+                                    .as_ref()
+                                    .map(|u| build_metrics(u, started, first_token));
+                                final_emitted = true;
+                                return Some((
+                                    Ok(TokenChunk {
+                                        text: String::new(),
+                                        done: true,
+                                        metrics,
+                                    }),
+                                    (bs, buf, started, first_token, pending_usage, final_emitted),
+                                ));
+                            }
+                            SseEvent::Chunk(mut chunk) => {
+                                if !chunk.text.is_empty() && first_token.is_none() {
+                                    first_token = Some(Instant::now());
+                                }
+                                if chunk.done {
+                                    let metrics = pending_usage
+                                        .as_ref()
+                                        .map(|u| build_metrics(u, started, first_token));
+                                    chunk.metrics = metrics;
+                                    final_emitted = true;
+                                }
+                                return Some((
+                                    Ok(chunk),
+                                    (bs, buf, started, first_token, pending_usage, final_emitted),
+                                ));
+                            }
+                            SseEvent::Usage(u) => {
+                                pending_usage = Some(u);
+                                continue;
                             }
                         }
                     }
@@ -280,7 +324,10 @@ impl Runtime for LlamaCppRuntime {
                             buf.push_str(&String::from_utf8_lossy(&b));
                         }
                         Some(Err(e)) => {
-                            return Some((Err(AppError::Http(e)), (bs, buf)));
+                            return Some((
+                                Err(AppError::Http(e)),
+                                (bs, buf, started, first_token, pending_usage, final_emitted),
+                            ));
                         }
                         None => return None,
                     }
@@ -324,6 +371,8 @@ struct ChatRequest {
     messages: Vec<OaiMessage>,
     stream: bool,
     #[serde(skip_serializing_if = "Option::is_none")]
+    stream_options: Option<StreamOptions>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     temperature: Option<f32>,
     #[serde(skip_serializing_if = "Option::is_none")]
     top_p: Option<f32>,
@@ -334,6 +383,24 @@ struct ChatRequest {
 }
 
 #[derive(Serialize)]
+struct StreamOptions {
+    include_usage: bool,
+}
+
+#[derive(Clone, Copy, Debug, Deserialize)]
+struct OaiUsage {
+    #[serde(default)]
+    prompt_tokens: u32,
+    #[serde(default)]
+    completion_tokens: u32,
+    /// llama.cpp's extension: prompt processing + decode tok/s.
+    #[serde(default)]
+    prompt_per_second: Option<f32>,
+    #[serde(default)]
+    predicted_per_second: Option<f32>,
+}
+
+#[derive(Serialize)]
 struct OaiMessage {
     role: String,
     content: String,
@@ -341,7 +408,21 @@ struct OaiMessage {
 
 #[derive(Deserialize)]
 struct StreamFrame {
+    #[serde(default)]
     choices: Vec<StreamChoice>,
+    #[serde(default)]
+    usage: Option<OaiUsage>,
+    /// llama.cpp emits a top-level `timings` object with prefill/decode tok/s.
+    #[serde(default)]
+    timings: Option<LlamaCppTimings>,
+}
+
+#[derive(Clone, Copy, Debug, Default, Deserialize)]
+struct LlamaCppTimings {
+    #[serde(default)]
+    prompt_per_second: Option<f32>,
+    #[serde(default)]
+    predicted_per_second: Option<f32>,
 }
 
 #[derive(Deserialize)]
@@ -380,6 +461,7 @@ fn to_oai_message(m: &Message) -> OaiMessage {
 
 enum SseEvent {
     Chunk(TokenChunk),
+    Usage(OaiUsage),
     Done,
 }
 
@@ -425,6 +507,23 @@ fn take_event(buf: &str) -> Option<(SseEvent, String)> {
         }
     };
 
+    // A frame with usage but no choices (or empty choices) is the final
+    // metrics frame emitted when stream_options.include_usage = true.
+    if let Some(u) = frame.usage {
+        // Merge any timings llama.cpp tucked next to the usage.
+        let merged = OaiUsage {
+            prompt_tokens: u.prompt_tokens,
+            completion_tokens: u.completion_tokens,
+            prompt_per_second: u
+                .prompt_per_second
+                .or(frame.timings.and_then(|t| t.prompt_per_second)),
+            predicted_per_second: u
+                .predicted_per_second
+                .or(frame.timings.and_then(|t| t.predicted_per_second)),
+        };
+        return Some((SseEvent::Usage(merged), rest));
+    }
+
     let mut text = String::new();
     let mut done = false;
     if let Some(c) = frame.choices.into_iter().next() {
@@ -439,8 +538,62 @@ fn take_event(buf: &str) -> Option<(SseEvent, String)> {
         SseEvent::Chunk(TokenChunk {
             text,
             done,
-            metrics: None, // TODO: capture from final chunk's `usage` field
+            metrics: None,
         }),
         rest,
     ))
+}
+
+/// Combine timed-on-our-side TTFT/total with server-provided usage into a
+/// `RuntimeMetrics`.
+fn build_metrics(u: &OaiUsage, started: Instant, first_token: Option<Instant>) -> RuntimeMetrics {
+    let now = Instant::now();
+    let total_ms = (now - started).as_millis() as u32;
+    let ttft_ms = first_token
+        .map(|t| (t - started).as_millis() as u32)
+        .unwrap_or(0);
+
+    // Prefer server-reported tok/s; fall back to deriving decode tok/s
+    // from completion_tokens and (total - ttft) ms.
+    let decode_secs = if total_ms > ttft_ms {
+        (total_ms - ttft_ms) as f32 / 1000.0
+    } else {
+        0.0
+    };
+    let decode = u.predicted_per_second.unwrap_or_else(|| {
+        if decode_secs > 0.0 && u.completion_tokens > 0 {
+            u.completion_tokens as f32 / decode_secs
+        } else {
+            0.0
+        }
+    });
+    let prefill = u.prompt_per_second.unwrap_or_else(|| {
+        if ttft_ms > 0 && u.prompt_tokens > 0 {
+            u.prompt_tokens as f32 / (ttft_ms as f32 / 1000.0)
+        } else {
+            0.0
+        }
+    });
+
+    RuntimeMetrics {
+        tokens_per_sec_decode: decode,
+        tokens_per_sec_prefill: prefill,
+        ttft_ms,
+        total_ms,
+        prompt_tokens: u.prompt_tokens,
+        completion_tokens: u.completion_tokens,
+        hardware: hardware_label(),
+    }
+}
+
+/// Best-effort hardware label for the bubble footer. Refined later by
+/// reading actual device info from llama.cpp's startup logs.
+fn hardware_label() -> Option<String> {
+    if cfg!(target_os = "macos") {
+        Some("llama.cpp · Metal".to_string())
+    } else if cfg!(target_os = "windows") {
+        Some("llama.cpp · CUDA/Vulkan".to_string())
+    } else {
+        Some("llama.cpp · CPU".to_string())
+    }
 }

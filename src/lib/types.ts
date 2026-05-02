@@ -92,8 +92,10 @@ export interface RuntimeMetrics {
   tokens_per_sec_decode: number;
   tokens_per_sec_prefill: number;
   ttft_ms: number;
+  total_ms: number;
   prompt_tokens: number;
   completion_tokens: number;
+  hardware?: string;
 }
 
 export interface DownloadProgress {
