@@ -9,6 +9,7 @@ import {
   getConversation,
   deleteConversation as deleteConvIpc,
 } from "../lib/ipc";
+import { shortcutLabel, useShortcuts } from "../lib/useShortcut";
 import {
   ALL_RUNTIMES,
   RUNTIME_LABELS,
@@ -209,6 +210,28 @@ export default function ChatPage() {
     setTurnStatus("idle");
   };
 
+  // Chat-specific shortcuts.
+  useShortcuts(
+    [
+      { combo: "cmd+n", handler: handleNewChat },
+      {
+        combo: "cmd+,",
+        handler: () =>
+          setDrawer((prev) => (prev === "settings" ? null : "settings")),
+      },
+      {
+        combo: "cmd+h",
+        handler: () =>
+          setDrawer((prev) => (prev === "history" ? null : "history")),
+      },
+      { combo: "esc", handler: () => setDrawer(null) },
+      { combo: "cmd+enter", handler: () => send() },
+    ],
+    // send/handleNewChat capture state via closure — re-bind on every render
+    // so the latest input/convId/etc. are used. This is fine; the listener is
+    // attached once per render but always reflects current state.
+  );
+
   const loadConversation = async (id: string) => {
     try {
       const conv = await getConversation(id);
@@ -287,14 +310,14 @@ export default function ChatPage() {
 
           <div className="ml-auto flex items-center gap-1">
             <IconButton
-              label="History"
+              label={`History (${shortcutLabel("cmd+h")})`}
               active={drawer === "history"}
               onClick={() => setDrawer(drawer === "history" ? null : "history")}
             >
               <History size={14} />
             </IconButton>
             <IconButton
-              label="Settings"
+              label={`Settings (${shortcutLabel("cmd+,")})`}
               active={drawer === "settings"}
               onClick={() =>
                 setDrawer(drawer === "settings" ? null : "settings")
@@ -304,7 +327,7 @@ export default function ChatPage() {
             </IconButton>
             <button
               onClick={handleNewChat}
-              title="New chat"
+              title={`New chat (${shortcutLabel("cmd+n")})`}
               aria-label="New chat"
               className="text-xs px-2 py-1 rounded border border-zinc-800 hover:border-zinc-600 text-zinc-300 ml-1 inline-flex items-center gap-1.5"
             >

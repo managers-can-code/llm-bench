@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { Pause, Play, X as XIcon } from "lucide-react";
 import { open } from "@tauri-apps/plugin-dialog";
+import { useShortcut } from "../lib/useShortcut";
 import {
   listModels,
   downloadModel,
@@ -347,9 +348,21 @@ function ImportDialog({ onClose, onImported }: ImportDialogProps) {
     }
   };
 
+  // Esc to close — defined inside the dialog so it only fires while open.
+  useShortcut("esc", onClose);
+
   return (
-    <div className="fixed inset-0 bg-black/60 flex items-center justify-center z-50">
-      <div className="bg-zinc-950 border border-zinc-800 rounded-lg w-[480px] p-5 space-y-4">
+    <div
+      className="fixed inset-0 bg-black/60 flex items-center justify-center z-50"
+      onClick={(e) => {
+        // Backdrop click closes; clicks inside the panel bubble are stopped below.
+        if (e.target === e.currentTarget) onClose();
+      }}
+    >
+      <div
+        className="bg-zinc-950 border border-zinc-800 rounded-lg w-[480px] p-5 space-y-4"
+        onClick={(e) => e.stopPropagation()}
+      >
         <div className="flex items-center justify-between">
           <h2 className="font-semibold">Import a model</h2>
           <button
