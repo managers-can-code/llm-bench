@@ -43,8 +43,14 @@ export default function ChatPage() {
   }, []);
 
   // Subscribe to streaming chunks for the active conversation.
+  // Race-safe cleanup: React 18 StrictMode mounts effects twice in dev. The
+  // listener registration is async, so without `cancelled`, the first mount's
+  // cleanup runs before .then() resolves, leaks the listener, and the second
+  // mount registers ANOTHER one — so every chunk fires twice and every token
+  // appears duplicated in the UI.
   useEffect(() => {
     if (!convId) return;
+    let cancelled = false;
     let unlisten: (() => void) | undefined;
     onChatChunk(convId, (chunk) => {
       setBubbles((prev) => {
@@ -56,15 +62,21 @@ export default function ChatPage() {
         }
         return next;
       });
-      // auto-scroll
       requestAnimationFrame(() => {
         scrollRef.current?.scrollTo({
           top: scrollRef.current.scrollHeight,
         });
       });
       if (chunk.done) setSending(false);
-    }).then((u) => (unlisten = u));
+    }).then((u) => {
+      if (cancelled) {
+        u();
+      } else {
+        unlisten = u;
+      }
+    });
     return () => {
+      cancelled = true;
       unlisten?.();
     };
   }, [convId]);

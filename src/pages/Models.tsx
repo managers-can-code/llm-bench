@@ -28,13 +28,23 @@ export default function ModelsPage() {
 
   useEffect(() => {
     refresh();
+    let cancelled = false;
     let unlisten: (() => void) | undefined;
     onDownloadProgress((p) => {
       const key = `${p.model_id}::${p.runtime}`;
       setProgress((prev) => ({ ...prev, [key]: p }));
       if (p.state === "done") refresh();
-    }).then((u) => (unlisten = u));
-    return () => unlisten?.();
+    }).then((u) => {
+      if (cancelled) {
+        u();
+      } else {
+        unlisten = u;
+      }
+    });
+    return () => {
+      cancelled = true;
+      unlisten?.();
+    };
   }, []);
 
   const handleDownload = async (m: Model, rt: RuntimeId) => {
