@@ -62,22 +62,62 @@ impl MlxRuntime {
         }
     }
 
-    /// MLX is a Python entry point; users typically install via pip and the
-    /// binary `mlx_lm.server` lands on $PATH. We honor an override via env var.
-    fn server_binary(&self) -> PathBuf {
+    /// MLX is a Python entry point. On macOS with `pip3 install --user mlx-lm`,
+    /// the console script lands at e.g. `~/Library/Python/3.9/bin/mlx_lm.server`,
+    /// which often isn't on PATH. To avoid making users edit shell rc files,
+    /// we resolve in this order:
+    ///
+    ///   1. `$LLM_BENCH_MLX_SERVER` env var (explicit override).
+    ///   2. Vendored binary at `~/.llm-bench/runtimes/mlx/mlx_lm.server`.
+    ///   3. `mlx_lm.server` on PATH.
+    ///   4. Common user-base bin dirs (`~/Library/Python/3.x/bin/`,
+    ///      `~/.local/bin/`).
+    ///   5. Fallback module form: `python3 -m mlx_lm.server`.
+    ///
+    /// `server_command()` returns `(program, leading_args)` so callers can
+    /// transparently use either the binary or the module form.
+    fn server_command(&self) -> (PathBuf, Vec<String>) {
+        // 1. Explicit override.
         if let Ok(p) = std::env::var("LLM_BENCH_MLX_SERVER") {
-            return PathBuf::from(p);
+            return (PathBuf::from(p), vec![]);
         }
-        // Try a vendored binary first, fall back to PATH lookup.
+        // 2. Vendored.
         let vendored = self
             .app_dir
             .join("runtimes")
             .join("mlx")
             .join("mlx_lm.server");
         if vendored.exists() {
-            return vendored;
+            return (vendored, vec![]);
         }
-        PathBuf::from("mlx_lm.server")
+        // 3. PATH.
+        if which("mlx_lm.server").is_some() {
+            return (PathBuf::from("mlx_lm.server"), vec![]);
+        }
+        // 4. Likely user-base dirs.
+        if let Some(home) = dirs::home_dir() {
+            let candidates = [
+                home.join("Library/Python/3.13/bin/mlx_lm.server"),
+                home.join("Library/Python/3.12/bin/mlx_lm.server"),
+                home.join("Library/Python/3.11/bin/mlx_lm.server"),
+                home.join("Library/Python/3.10/bin/mlx_lm.server"),
+                home.join("Library/Python/3.9/bin/mlx_lm.server"),
+                home.join(".local/bin/mlx_lm.server"),
+            ];
+            for c in candidates {
+                if c.exists() {
+                    return (c, vec![]);
+                }
+            }
+        }
+        // 5. Module form: `python3 -m mlx_lm.server` requires only python3 on PATH.
+        let py = which("python3").unwrap_or_else(|| PathBuf::from("python3"));
+        (py, vec!["-m".into(), "mlx_lm.server".into()])
+    }
+
+    /// Convenience: just the binary path (used by installed/version checks).
+    fn server_binary(&self) -> PathBuf {
+        self.server_command().0
     }
 
     fn local_model_path(&self, model: &Model) -> Option<PathBuf> {
@@ -135,8 +175,11 @@ impl Runtime for MlxRuntime {
             )));
         }
 
-        let bin = self.server_binary();
+        let (bin, leading_args) = self.server_command();
         let mut cmd = Command::new(&bin);
+        for a in &leading_args {
+            cmd.arg(a);
+        }
         cmd.arg("--model")
             .arg(&model_path)
             .arg("--port")
@@ -264,13 +307,13 @@ impl Runtime for MlxRuntime {
     }
 
     async fn installed(&self) -> bool {
-        // Either a vendored copy exists, or `mlx_lm.server --help` exits 0.
-        let bin = self.server_binary();
-        if bin.exists() && bin.is_file() {
-            return true;
+        // Test whichever resolution strategy server_command() picks.
+        let (bin, leading_args) = self.server_command();
+        let mut cmd = Command::new(&bin);
+        for a in &leading_args {
+            cmd.arg(a);
         }
-        Command::new(bin)
-            .arg("--help")
+        cmd.arg("--help")
             .stdout(Stdio::null())
             .stderr(Stdio::null())
             .status()
@@ -294,6 +337,19 @@ impl Runtime for MlxRuntime {
             Some(s)
         }
     }
+}
+
+/// Walk $PATH for `name`, returning the first match. Avoids pulling in the
+/// `which` crate just for this.
+fn which(name: &str) -> Option<PathBuf> {
+    let path_var = std::env::var_os("PATH")?;
+    for dir in std::env::split_paths(&path_var) {
+        let candidate = dir.join(name);
+        if candidate.is_file() {
+            return Some(candidate);
+        }
+    }
+    None
 }
 
 /* ---------- shared OpenAI-compat wire types (parallel to llamacpp.rs) ---------- */
