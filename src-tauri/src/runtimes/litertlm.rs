@@ -154,21 +154,21 @@ impl Runtime for LiteRtLmRuntime {
 
         let prompt = format_prompt(msgs);
 
+        // litert-lm CLI shape (per `litert-lm run -h`):
+        //   litert-lm run [OPTIONS] MODEL_REFERENCE
+        // The model path is positional, NOT --model. Sampling flag names
+        // (temperature/top-p/max-tokens) and prompt-passing convention
+        // (--prompt vs --input vs stdin) need verification per release;
+        // until we have a confirmed flag table, we pass the prompt on stdin
+        // and let the model use its default sampling. This is good enough
+        // to validate end-to-end that streaming works.
         let mut cmd = Command::new(&bin);
-        cmd.arg("run").arg("--model").arg(&model_path);
-        if let Some(t) = opts.temperature {
-            cmd.arg("--temperature").arg(t.to_string());
-        }
-        if let Some(p) = opts.top_p {
-            cmd.arg("--top-p").arg(p.to_string());
-        }
-        if let Some(m) = opts.max_tokens {
-            cmd.arg("--max-tokens").arg(m.to_string());
-        }
-        // The CLI accepts the prompt either via --prompt or stdin. We use
-        // --prompt for a single-shot exchange and avoid stdin coordination.
-        cmd.arg("--prompt").arg(&prompt);
-        cmd.stdout(Stdio::piped()).stderr(Stdio::inherit());
+        cmd.arg("run").arg(&model_path);
+        cmd.stdin(Stdio::piped())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::inherit());
+        // Acknowledge opts to satisfy unused warnings until per-flag wiring lands.
+        let _ = (&opts.temperature, &opts.top_p, &opts.max_tokens);
 
         tracing::info!(
             "spawning litert-lm: {} {}",
@@ -186,6 +186,18 @@ impl Runtime for LiteRtLmRuntime {
                 bin.display()
             ))
         })?;
+
+        // Pipe the formatted prompt into stdin and close it so the CLI
+        // knows the input is complete and can start generating.
+        if let Some(mut stdin) = child.stdin.take() {
+            use tokio::io::AsyncWriteExt;
+            if let Err(e) = stdin.write_all(prompt.as_bytes()).await {
+                tracing::warn!(error=%e, "failed to write prompt to litert-lm stdin");
+            }
+            // Drop closes the pipe; explicit shutdown is more polite.
+            let _ = stdin.shutdown().await;
+            drop(stdin);
+        }
 
         let stdout = child
             .stdout
