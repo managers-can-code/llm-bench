@@ -340,6 +340,20 @@ pub async fn start_chat_turn(
         )
         .await;
 
+        // If run_turn errored, surface that to the UI now — otherwise the
+        // bubble hangs on "..." forever. run_turn only emits a done chunk on
+        // its own success path.
+        if let Err(e) = &result {
+            let _ = app.emit(
+                &event_name,
+                &TokenChunk {
+                    text: format!("[error] {e}"),
+                    done: true,
+                    metrics: None,
+                },
+            );
+        }
+
         // 4. Persist the assistant turn (full text) regardless of success.
         let mut conv = match store.lock().await.get_conversation(&conv_id) {
             Ok(c) => c,

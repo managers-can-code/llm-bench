@@ -269,23 +269,33 @@ impl Runtime for LiteRtLmRuntime {
 /// matches the registry's expected location for `model_id`. We don't have
 /// a registry reference inside the runtime, so this is an inexact filename
 /// scan — good enough since model ids are unique slugs.
+///
+/// Match is case-insensitive because Hugging Face repos preserve the model
+/// name's mixed casing (e.g. "gemma-4-E2B-it") while our stable model ids
+/// are all lowercase.
 async fn find_model_file(root: &std::path::Path, model_id: &str) -> Option<PathBuf> {
     use tokio::fs;
+    let needle1 = model_id.to_lowercase();
+    let needle2 = needle1.replace('-', "_");
     let mut stack = vec![root.to_path_buf()];
     while let Some(dir) = stack.pop() {
-        let mut rd = fs::read_dir(&dir).await.ok()?;
+        let mut rd = match fs::read_dir(&dir).await {
+            Ok(r) => r,
+            Err(_) => continue,
+        };
         while let Ok(Some(e)) = rd.next_entry().await {
             let p = e.path();
-            let ft = e.file_type().await.ok()?;
+            let ft = match e.file_type().await {
+                Ok(t) => t,
+                Err(_) => continue,
+            };
             if ft.is_dir() {
                 stack.push(p);
                 continue;
             }
             if p.extension().and_then(|s| s.to_str()) == Some("litertlm") {
-                // Match by the slug appearing somewhere in the path
-                // (folder names usually contain it).
-                let s = p.to_string_lossy();
-                if s.contains(model_id) || s.contains(&model_id.replace('-', "_")) {
+                let s = p.to_string_lossy().to_lowercase();
+                if s.contains(&needle1) || s.contains(&needle2) {
                     return Some(p);
                 }
             }
