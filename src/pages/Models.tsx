@@ -1,7 +1,19 @@
-import { useEffect, useRef, useState } from "react";
-import { Pause, Play, X as XIcon } from "lucide-react";
+import { useEffect, useMemo, useRef, useState } from "react";
+import { Link } from "react-router-dom";
+import {
+  Check,
+  MessageSquare,
+  MoreVertical,
+  Pause,
+  Play,
+  Search,
+  Trash2,
+  X as XIcon,
+} from "lucide-react";
 import { open } from "@tauri-apps/plugin-dialog";
 import { useShortcut } from "../lib/useShortcut";
+import { useToast } from "../lib/toast";
+import { useConfirm } from "../lib/confirm";
 import {
   listModels,
   downloadModel,
@@ -27,14 +39,33 @@ export default function ModelsPage() {
   const [models, setModels] = useState<Model[]>([]);
   const [progress, setProgress] = useState<Record<string, DownloadProgress>>({});
   const [importOpen, setImportOpen] = useState(false);
+  const [search, setSearch] = useState("");
+  const [installedOnly, setInstalledOnly] = useState(false);
   // History of (timestamp, bytes_done) per download key, used for speed/ETA.
   const samplesRef = useRef<Record<string, ProgressSample[]>>({});
+  const toast = useToast();
+  const confirm = useConfirm();
 
   const refresh = () => {
     listModels()
       .then(setModels)
       .catch(() => setModels([]));
   };
+
+  const filteredModels = useMemo(() => {
+    const q = search.trim().toLowerCase();
+    return models.filter((m) => {
+      if (q) {
+        const hay = `${m.display_name} ${m.id} ${m.family}`.toLowerCase();
+        if (!hay.includes(q)) return false;
+      }
+      if (installedOnly) {
+        const anyInstalled = Object.values(m.local).some(Boolean);
+        if (!anyInstalled) return false;
+      }
+      return true;
+    });
+  }, [models, search, installedOnly]);
 
   useEffect(() => {
     refresh();
@@ -67,7 +98,7 @@ export default function ModelsPage() {
     try {
       await downloadModel(m.id, rt);
     } catch (e) {
-      alert(`download failed: ${e}`);
+      toast.push(`Download failed: ${e}`, "error");
     }
   };
 
@@ -75,18 +106,24 @@ export default function ModelsPage() {
     try {
       await pauseDownload(m.id, rt);
     } catch (e) {
-      alert(`pause failed: ${e}`);
+      toast.push(`Pause failed: ${e}`, "error");
     }
   };
 
   const handleDelete = async (m: Model, rt: RuntimeId) => {
-    if (!confirm(`Delete local copy of ${m.display_name} (${RUNTIME_LABELS[rt]})?`))
-      return;
+    const ok = await confirm.confirm({
+      title: "Delete local copy?",
+      message: `Delete ${m.display_name} (${RUNTIME_LABELS[rt]}) from disk? You can re-download it later.`,
+      confirmLabel: "Delete",
+      destructive: true,
+    });
+    if (!ok) return;
     try {
       await deleteLocalModel(m.id, rt);
+      toast.push(`Deleted ${m.display_name} (${RUNTIME_LABELS[rt]})`, "success");
       refresh();
     } catch (e) {
-      alert(`delete failed: ${e}`);
+      toast.push(`Delete failed: ${e}`, "error");
     }
   };
 
@@ -108,10 +145,42 @@ export default function ModelsPage() {
         </button>
       </div>
 
+      <div className="flex items-center gap-3 mb-3">
+        <div className="flex items-center gap-2 flex-1 max-w-sm bg-zinc-900 border border-zinc-800 rounded px-2 py-1.5">
+          <Search size={14} className="text-zinc-500" />
+          <input
+            type="text"
+            placeholder="Search models…"
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
+            className="flex-1 bg-transparent text-sm outline-none placeholder:text-zinc-500"
+          />
+          {search && (
+            <button
+              onClick={() => setSearch("")}
+              aria-label="Clear search"
+              className="text-zinc-500 hover:text-zinc-300"
+            >
+              <XIcon size={12} />
+            </button>
+          )}
+        </div>
+        <label className="text-xs text-zinc-300 inline-flex items-center gap-2 cursor-pointer">
+          <input
+            type="checkbox"
+            checked={installedOnly}
+            onChange={(e) => setInstalledOnly(e.target.checked)}
+            className="accent-zinc-300"
+          />
+          Installed only
+        </label>
+      </div>
+
       <div className="border border-zinc-800 rounded overflow-hidden">
         <table className="w-full text-sm">
           <thead className="bg-zinc-900 text-zinc-400 text-xs uppercase tracking-wider">
             <tr>
+              <th className="text-left px-2 py-2 w-8"></th>
               <th className="text-left px-3 py-2">Model</th>
               <th className="text-left px-3 py-2">Arch</th>
               <th className="text-left px-3 py-2">Quant</th>
@@ -126,77 +195,108 @@ export default function ModelsPage() {
             {models.length === 0 && (
               <tr>
                 <td
-                  colSpan={3 + ALL_RUNTIMES.length}
+                  colSpan={4 + ALL_RUNTIMES.length}
                   className="px-6 py-10"
                 >
                   <ModelsEmptyState onImport={() => setImportOpen(true)} />
                 </td>
               </tr>
             )}
-            {models.map((m) => (
-              <tr key={m.id} className="border-t border-zinc-800 align-top">
-                <td className="px-3 py-3">
-                  <div className="font-medium">{m.display_name}</div>
-                  <div className="text-xs text-zinc-400">{m.id}</div>
-                  <div className="text-[10px] text-zinc-500 mt-0.5 uppercase tracking-wider">
-                    {m.modalities.join(" · ")}
-                  </div>
+            {models.length > 0 && filteredModels.length === 0 && (
+              <tr>
+                <td
+                  colSpan={4 + ALL_RUNTIMES.length}
+                  className="px-6 py-8 text-center text-sm text-zinc-400"
+                >
+                  No models match your filters.
                 </td>
-                <td className="px-3 py-3 text-zinc-300">
-                  {m.arch.kind === "moe"
-                    ? `MoE (${m.arch.active_b}B/${m.arch.total_b}B)`
-                    : "dense"}
-                </td>
-                <td className="px-3 py-3 text-zinc-300 font-mono text-xs">
-                  {m.quant}
-                </td>
-                {ALL_RUNTIMES.map((rt) => {
-                  const binding = m.bindings.find((b) => b.runtime === rt);
-                  const local = m.local[rt];
-                  const key = `${m.id}::${rt}`;
-                  const prog = progress[key];
-                  const samples = samplesRef.current[key] ?? [];
-                  return (
-                    <td key={rt} className="px-3 py-3">
-                      {!binding ? (
-                        <span className="text-xs text-zinc-700">—</span>
-                      ) : !binding.available ? (
-                        <span className="text-xs text-zinc-500">build pending</span>
-                      ) : prog && prog.state === "downloading" ? (
-                        <DownloadingCell
-                          p={prog}
-                          samples={samples}
-                          onPause={() => handlePause(m, rt)}
-                        />
-                      ) : prog && prog.state === "paused" ? (
-                        <button
-                          onClick={() => handleDownload(m, rt)}
-                          aria-label="Resume download"
-                          className="text-xs px-2 py-1 rounded border border-amber-700 text-amber-400 hover:border-amber-500 inline-flex items-center gap-1.5"
-                        >
-                          <Play size={12} fill="currentColor" />
-                          resume · {(prog.bytes_done / 1_073_741_824).toFixed(1)} GB
-                        </button>
-                      ) : local ? (
-                        <button
-                          onClick={() => handleDelete(m, rt)}
-                          className="text-xs px-2 py-1 rounded border border-zinc-700 hover:border-red-700 hover:text-red-400"
-                        >
-                          delete · {binding.size_gb.toFixed(1)} GB
-                        </button>
-                      ) : (
-                        <button
-                          onClick={() => handleDownload(m, rt)}
-                          className="text-xs px-2 py-1 rounded border border-zinc-700 hover:border-zinc-500"
-                        >
-                          download · {binding.size_gb.toFixed(1)} GB
-                        </button>
-                      )}
-                    </td>
-                  );
-                })}
               </tr>
-            ))}
+            )}
+            {filteredModels.map((m) => {
+              const anyInstalled = Object.values(m.local).some(Boolean);
+              return (
+                <tr key={m.id} className="border-t border-zinc-800 align-top">
+                  <td className="px-2 py-3">
+                    {anyInstalled ? (
+                      <span
+                        title="Installed locally"
+                        className="inline-flex items-center justify-center w-5 h-5 rounded-full bg-emerald-900/40 text-emerald-300"
+                      >
+                        <Check size={12} />
+                      </span>
+                    ) : (
+                      <span
+                        title="Not installed"
+                        className="inline-block w-2 h-2 rounded-full bg-zinc-700 ml-1.5"
+                      />
+                    )}
+                  </td>
+                  <td className="px-3 py-3">
+                    <div className="font-medium text-zinc-100">
+                      {m.display_name}
+                    </div>
+                    <div className="text-xs text-zinc-400">{m.id}</div>
+                    <div className="text-[10px] text-zinc-500 mt-0.5 uppercase tracking-wider">
+                      {m.modalities.join(" · ")}
+                    </div>
+                  </td>
+                  <td className="px-3 py-3 text-zinc-300">
+                    {m.arch.kind === "moe"
+                      ? `MoE (${m.arch.active_b}B/${m.arch.total_b}B)`
+                      : "dense"}
+                  </td>
+                  <td className="px-3 py-3 text-zinc-300 font-mono text-xs">
+                    {m.quant}
+                  </td>
+                  {ALL_RUNTIMES.map((rt) => {
+                    const binding = m.bindings.find((b) => b.runtime === rt);
+                    const local = m.local[rt];
+                    const key = `${m.id}::${rt}`;
+                    const prog = progress[key];
+                    const samples = samplesRef.current[key] ?? [];
+                    return (
+                      <td key={rt} className="px-3 py-3">
+                        {!binding ? (
+                          <span className="text-xs text-zinc-700">—</span>
+                        ) : !binding.available ? (
+                          <span className="text-xs text-zinc-500">
+                            build pending
+                          </span>
+                        ) : prog && prog.state === "downloading" ? (
+                          <DownloadingCell
+                            p={prog}
+                            samples={samples}
+                            onPause={() => handlePause(m, rt)}
+                          />
+                        ) : prog && prog.state === "paused" ? (
+                          <button
+                            onClick={() => handleDownload(m, rt)}
+                            aria-label="Resume download"
+                            className="text-xs px-2 py-1 rounded border border-amber-700 text-amber-400 hover:border-amber-500 inline-flex items-center gap-1.5"
+                          >
+                            <Play size={12} fill="currentColor" />
+                            resume ·{" "}
+                            {(prog.bytes_done / 1_073_741_824).toFixed(1)} GB
+                          </button>
+                        ) : local ? (
+                          <InstalledCell
+                            sizeGb={binding.size_gb}
+                            onDelete={() => handleDelete(m, rt)}
+                          />
+                        ) : (
+                          <button
+                            onClick={() => handleDownload(m, rt)}
+                            className="text-xs px-2 py-1 rounded border border-zinc-700 hover:border-zinc-500 text-zinc-200"
+                          >
+                            download · {binding.size_gb.toFixed(1)} GB
+                          </button>
+                        )}
+                      </td>
+                    );
+                  })}
+                </tr>
+              );
+            })}
           </tbody>
         </table>
       </div>
@@ -218,6 +318,70 @@ interface DownloadingCellProps {
   p: DownloadProgress;
   samples: ProgressSample[];
   onPause: () => void;
+}
+
+interface InstalledCellProps {
+  sizeGb: number;
+  onDelete: () => void;
+}
+
+function InstalledCell({ sizeGb, onDelete }: InstalledCellProps) {
+  const [open, setOpen] = useState(false);
+  // Close on outside click.
+  useEffect(() => {
+    if (!open) return;
+    const handler = () => setOpen(false);
+    // Defer to next frame so the click that opens us doesn't immediately close.
+    const id = requestAnimationFrame(() => {
+      window.addEventListener("click", handler);
+    });
+    return () => {
+      cancelAnimationFrame(id);
+      window.removeEventListener("click", handler);
+    };
+  }, [open]);
+
+  return (
+    <div className="flex items-center gap-1">
+      <Link
+        to="/chat"
+        className="text-xs px-2 py-1 rounded border border-zinc-700 text-zinc-200 hover:border-zinc-500 inline-flex items-center gap-1.5"
+        title="Open in chat"
+      >
+        <MessageSquare size={11} />
+        installed · {sizeGb.toFixed(1)} GB
+      </Link>
+      <div className="relative">
+        <button
+          onClick={(e) => {
+            e.stopPropagation();
+            setOpen((v) => !v);
+          }}
+          aria-label="More actions"
+          className="text-zinc-400 hover:text-zinc-100 p-1 rounded hover:bg-zinc-800"
+        >
+          <MoreVertical size={12} />
+        </button>
+        {open && (
+          <div
+            className="absolute right-0 top-full mt-1 z-10 w-40 rounded border border-zinc-800 bg-zinc-950 shadow-lg py-1"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <button
+              onClick={() => {
+                setOpen(false);
+                onDelete();
+              }}
+              className="w-full text-left text-xs px-3 py-1.5 text-red-400 hover:bg-red-950/40 inline-flex items-center gap-2"
+            >
+              <Trash2 size={12} />
+              Delete from disk
+            </button>
+          </div>
+        )}
+      </div>
+    </div>
+  );
 }
 
 function ModelsEmptyState({ onImport }: { onImport: () => void }) {

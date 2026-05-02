@@ -7,6 +7,8 @@ import EvalsPage from "./pages/Evals";
 import BenchmarksPage from "./pages/Benchmarks";
 import ComparePage from "./pages/Compare";
 import { useShortcuts } from "./lib/useShortcut";
+import { ToastProvider } from "./lib/toast";
+import { ConfirmProvider } from "./lib/confirm";
 
 const NAV_PATHS = ["/chat", "/models", "/evals", "/benchmarks", "/compare"];
 
@@ -28,22 +30,26 @@ export default function App() {
   );
 
   return (
-    <div className="flex h-screen w-screen overflow-hidden">
-      <Sidebar />
-      <main className="flex-1 overflow-hidden">
-        <Routes>
-          <Route path="/" element={<Navigate to="/chat" replace />} />
-          <Route path="/chat" element={<ChatPage />} />
-          <Route path="/models" element={<ModelsPage />} />
-          <Route path="/evals" element={<EvalsPage />} />
-          <Route path="/benchmarks" element={<BenchmarksPage />} />
-          <Route path="/compare" element={<ComparePage />} />
-        </Routes>
-      </main>
-      {paletteOpen && (
-        <CommandPaletteStub onClose={() => setPaletteOpen(false)} />
-      )}
-    </div>
+    <ToastProvider>
+      <ConfirmProvider>
+        <div className="flex h-screen w-screen overflow-hidden">
+          <Sidebar />
+          <main className="flex-1 overflow-hidden">
+            <Routes>
+              <Route path="/" element={<Navigate to="/chat" replace />} />
+              <Route path="/chat" element={<ChatPage />} />
+              <Route path="/models" element={<ModelsPage />} />
+              <Route path="/evals" element={<EvalsPage />} />
+              <Route path="/benchmarks" element={<BenchmarksPage />} />
+              <Route path="/compare" element={<ComparePage />} />
+            </Routes>
+          </main>
+          {paletteOpen && (
+            <CommandPaletteStub onClose={() => setPaletteOpen(false)} />
+          )}
+        </div>
+      </ConfirmProvider>
+    </ToastProvider>
   );
 }
 

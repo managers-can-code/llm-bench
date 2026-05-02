@@ -11,6 +11,8 @@ import {
   deleteConversation as deleteConvIpc,
 } from "../lib/ipc";
 import { shortcutLabel, useShortcuts } from "../lib/useShortcut";
+import { useToast } from "../lib/toast";
+import { useConfirm } from "../lib/confirm";
 import {
   ALL_RUNTIMES,
   RUNTIME_LABELS,
@@ -73,6 +75,8 @@ export default function ChatPage() {
   const [conversations, setConversations] = useState<Conversation[]>([]);
   const [genOpts, setGenOpts] = useState<GenOpts>(loadGenOpts);
   const scrollRef = useRef<HTMLDivElement>(null);
+  const toast = useToast();
+  const confirm = useConfirm();
 
   // Persist gen opts on change.
   useEffect(() => {
@@ -273,19 +277,26 @@ export default function ChatPage() {
       setTurnStatus("idle");
       setDrawer(null);
     } catch (e) {
-      alert(`could not load conversation: ${e}`);
+      toast.push(`Couldn't load conversation: ${e}`, "error");
     }
   };
 
   const handleDeleteConversation = async (id: string, evt: React.MouseEvent) => {
     evt.stopPropagation();
-    if (!confirm("Delete this conversation?")) return;
+    const ok = await confirm.confirm({
+      title: "Delete conversation?",
+      message: "This conversation will be removed from your local history.",
+      confirmLabel: "Delete",
+      destructive: true,
+    });
+    if (!ok) return;
     try {
       await deleteConvIpc(id);
       if (convId === id) handleNewChat();
       refreshHistory();
+      toast.push("Conversation deleted", "success");
     } catch (e) {
-      alert(`delete failed: ${e}`);
+      toast.push(`Delete failed: ${e}`, "error");
     }
   };
 
