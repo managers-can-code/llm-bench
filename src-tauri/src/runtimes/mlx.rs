@@ -62,47 +62,34 @@ impl MlxRuntime {
         }
     }
 
-    /// MLX is a Python entry point. On macOS with `pip3 install --user mlx-lm`,
-    /// the console script lands at e.g. `~/Library/Python/3.9/bin/mlx_lm.server`,
-    /// which often isn't on PATH. To avoid making users edit shell rc files,
-    /// we resolve in this order:
-    ///
-    ///   1. `$LLM_BENCH_MLX_SERVER` env var (explicit override).
-    ///   2. Vendored binary at `~/.llm-bench/runtimes/mlx/mlx_lm.server`.
-    ///   3. `mlx_lm.server` on PATH.
-    ///   4. Common user-base bin dirs (`~/Library/Python/3.x/bin/`,
-    ///      `~/.local/bin/`).
-    ///   5. Fallback module form: `python3 -m mlx_lm.server`.
-    ///
-    /// `server_command()` returns `(program, leading_args)` so callers can
-    /// transparently use either the binary or the module form.
-    fn server_command(&self) -> (PathBuf, Vec<String>) {
-        // 1. Explicit override.
-        if let Ok(p) = std::env::var("LLM_BENCH_MLX_SERVER") {
-            return (PathBuf::from(p), vec![]);
+    /// Resolve a server binary by name, walking the same lookup chain we use
+    /// for `mlx_lm.server`:
+    ///   1. `$LLM_BENCH_MLX_SERVER` (only honored when looking up mlx-lm).
+    ///   2. Vendored at `~/.llm-bench/runtimes/mlx/<name>`.
+    ///   3. On `$PATH`.
+    ///   4. Common user-base bin dirs (Python 3.13..3.9 + ~/.local/bin).
+    ///   5. Module form: `python3 -m <module>`.
+    fn resolve_server(&self, bin_name: &str, module_name: &str) -> (PathBuf, Vec<String>) {
+        if bin_name == "mlx_lm.server" {
+            if let Ok(p) = std::env::var("LLM_BENCH_MLX_SERVER") {
+                return (PathBuf::from(p), vec![]);
+            }
         }
-        // 2. Vendored.
-        let vendored = self
-            .app_dir
-            .join("runtimes")
-            .join("mlx")
-            .join("mlx_lm.server");
+        let vendored = self.app_dir.join("runtimes").join("mlx").join(bin_name);
         if vendored.exists() {
             return (vendored, vec![]);
         }
-        // 3. PATH.
-        if which("mlx_lm.server").is_some() {
-            return (PathBuf::from("mlx_lm.server"), vec![]);
+        if let Some(p) = which(bin_name) {
+            return (p, vec![]);
         }
-        // 4. Likely user-base dirs.
         if let Some(home) = dirs::home_dir() {
             let candidates = [
-                home.join("Library/Python/3.13/bin/mlx_lm.server"),
-                home.join("Library/Python/3.12/bin/mlx_lm.server"),
-                home.join("Library/Python/3.11/bin/mlx_lm.server"),
-                home.join("Library/Python/3.10/bin/mlx_lm.server"),
-                home.join("Library/Python/3.9/bin/mlx_lm.server"),
-                home.join(".local/bin/mlx_lm.server"),
+                home.join(format!("Library/Python/3.13/bin/{bin_name}")),
+                home.join(format!("Library/Python/3.12/bin/{bin_name}")),
+                home.join(format!("Library/Python/3.11/bin/{bin_name}")),
+                home.join(format!("Library/Python/3.10/bin/{bin_name}")),
+                home.join(format!("Library/Python/3.9/bin/{bin_name}")),
+                home.join(format!(".local/bin/{bin_name}")),
             ];
             for c in candidates {
                 if c.exists() {
@@ -110,14 +97,28 @@ impl MlxRuntime {
                 }
             }
         }
-        // 5. Module form: `python3 -m mlx_lm.server` requires only python3 on PATH.
         let py = which("python3").unwrap_or_else(|| PathBuf::from("python3"));
-        (py, vec!["-m".into(), "mlx_lm.server".into()])
+        (py, vec!["-m".into(), module_name.into()])
     }
 
-    /// Convenience: just the binary path (used by installed/version checks).
+    /// For text-only models we use `mlx_lm.server`; for multimodal (vision /
+    /// audio) we route to `mlx_vlm.server` since mlx-lm cannot load the
+    /// nested `language_model.*` tensor layout that VLMs use.
+    fn server_command_for(&self, model: &Model) -> (PathBuf, Vec<String>) {
+        let is_multimodal = model
+            .modalities
+            .iter()
+            .any(|m| !matches!(m, crate::core::Modality::Text));
+        if is_multimodal {
+            self.resolve_server("mlx_vlm.server", "mlx_vlm.server")
+        } else {
+            self.resolve_server("mlx_lm.server", "mlx_lm.server")
+        }
+    }
+
+    /// Convenience for `installed`/`version`: probe mlx-lm only.
     fn server_binary(&self) -> PathBuf {
-        self.server_command().0
+        self.resolve_server("mlx_lm.server", "mlx_lm.server").0
     }
 
     fn local_model_path(&self, model: &Model) -> Option<PathBuf> {
@@ -175,7 +176,7 @@ impl Runtime for MlxRuntime {
             )));
         }
 
-        let (bin, leading_args) = self.server_command();
+        let (bin, leading_args) = self.server_command_for(model);
         let mut cmd = Command::new(&bin);
         for a in &leading_args {
             cmd.arg(a);
@@ -307,8 +308,9 @@ impl Runtime for MlxRuntime {
     }
 
     async fn installed(&self) -> bool {
-        // Test whichever resolution strategy server_command() picks.
-        let (bin, leading_args) = self.server_command();
+        // mlx_lm.server is the baseline — if it's runnable, we consider MLX
+        // installed. mlx_vlm is checked lazily at load time for multimodal models.
+        let (bin, leading_args) = self.resolve_server("mlx_lm.server", "mlx_lm.server");
         let mut cmd = Command::new(&bin);
         for a in &leading_args {
             cmd.arg(a);
