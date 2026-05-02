@@ -154,20 +154,27 @@ impl Runtime for LiteRtLmRuntime {
 
         let prompt = format_prompt(msgs);
 
-        // litert-lm CLI shape (per `litert-lm run -h`):
+        // litert-lm CLI shape (verified via `litert-lm run -h`):
         //   litert-lm run [OPTIONS] MODEL_REFERENCE
-        // The model path is positional, NOT --model. Sampling flag names
-        // (temperature/top-p/max-tokens) and prompt-passing convention
-        // (--prompt vs --input vs stdin) need verification per release;
-        // until we have a confirmed flag table, we pass the prompt on stdin
-        // and let the model use its default sampling. This is good enough
-        // to validate end-to-end that streaming works.
+        //   Options:
+        //     --prompt TEXT                 single-shot prompt
+        //     --backend [cpu|gpu]           default cpu
+        //     --enable-speculative-decoding [auto|true|false]
+        //     --from-huggingface-repo TEXT  download from HF instead of local path
+        //     --huggingface-token TEXT
+        //     --verbose
+        //
+        // Notably absent: --temperature, --top-p, --max-tokens. The model uses
+        // its baked-in sampling. We default --backend to gpu on Apple Silicon
+        // for better perf; users can override later via a per-model setting.
         let mut cmd = Command::new(&bin);
         cmd.arg("run").arg(&model_path);
-        cmd.stdin(Stdio::piped())
-            .stdout(Stdio::piped())
-            .stderr(Stdio::inherit());
-        // Acknowledge opts to satisfy unused warnings until per-flag wiring lands.
+        cmd.arg("--prompt").arg(&prompt);
+        cmd.arg("--backend").arg("gpu");
+        cmd.stdout(Stdio::piped()).stderr(Stdio::inherit());
+        // GenOpts sampling fields aren't surfaced by litert-lm CLI; explicitly
+        // acknowledge to silence unused-warning while still keeping the trait
+        // signature uniform.
         let _ = (&opts.temperature, &opts.top_p, &opts.max_tokens);
 
         tracing::info!(
@@ -186,18 +193,6 @@ impl Runtime for LiteRtLmRuntime {
                 bin.display()
             ))
         })?;
-
-        // Pipe the formatted prompt into stdin and close it so the CLI
-        // knows the input is complete and can start generating.
-        if let Some(mut stdin) = child.stdin.take() {
-            use tokio::io::AsyncWriteExt;
-            if let Err(e) = stdin.write_all(prompt.as_bytes()).await {
-                tracing::warn!(error=%e, "failed to write prompt to litert-lm stdin");
-            }
-            // Drop closes the pipe; explicit shutdown is more polite.
-            let _ = stdin.shutdown().await;
-            drop(stdin);
-        }
 
         let stdout = child
             .stdout
