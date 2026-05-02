@@ -127,9 +127,9 @@ export default function ModelsPage() {
               <tr>
                 <td
                   colSpan={3 + ALL_RUNTIMES.length}
-                  className="text-center text-zinc-500 py-8 text-sm"
+                  className="px-6 py-10"
                 >
-                  No models loaded.
+                  <ModelsEmptyState onImport={() => setImportOpen(true)} />
                 </td>
               </tr>
             )}
@@ -218,6 +218,41 @@ interface DownloadingCellProps {
   p: DownloadProgress;
   samples: ProgressSample[];
   onPause: () => void;
+}
+
+function ModelsEmptyState({ onImport }: { onImport: () => void }) {
+  return (
+    <div className="text-center max-w-md mx-auto">
+      <h2 className="text-base font-medium text-zinc-200">No models yet</h2>
+      <p className="mt-2 text-sm text-zinc-400">
+        Download an int4-quantized model from Unsloth to get started — usually
+        2–8&nbsp;GB. You can also import any{" "}
+        <code className="text-zinc-300">.gguf</code>,{" "}
+        <code className="text-zinc-300">.litertlm</code>, or MLX directory you
+        already have on disk.
+      </p>
+      <div className="mt-5 flex justify-center gap-2">
+        <a
+          href="https://unsloth.ai/docs/models"
+          target="_blank"
+          rel="noreferrer"
+          className="text-sm px-3 py-1.5 rounded border border-zinc-700 text-zinc-200 hover:border-zinc-500"
+        >
+          Browse Unsloth models ↗
+        </a>
+        <button
+          onClick={onImport}
+          className="text-sm px-3 py-1.5 rounded bg-zinc-100 text-zinc-900 font-medium hover:bg-white"
+        >
+          + Import existing
+        </button>
+      </div>
+      <p className="mt-4 text-xs text-zinc-500">
+        Or wait — once the registry resolves, the four starter models will
+        appear here.
+      </p>
+    </div>
+  );
 }
 
 function DownloadingCell({ p, samples, onPause }: DownloadingCellProps) {
