@@ -40,3 +40,6 @@ Thumbs.db
 .env
 .env.*
 !.env.example
+
+# Rust profiler output
+*.profraw
