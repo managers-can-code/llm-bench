@@ -2,7 +2,7 @@ export default function ComparePage() {
   return (
     <div className="h-full overflow-y-auto p-6">
       <h1 className="text-lg font-semibold mb-1">Compare</h1>
-      <p className="text-sm text-zinc-500 mb-6">
+      <p className="text-sm text-zinc-400 mb-6">
         Side-by-side: same prompt, two (model × runtime) configs, dual streams,
         live metrics. Stubbed — see{" "}
         <code className="text-zinc-400">PLAN.md §10</code>.
@@ -12,7 +12,7 @@ export default function ComparePage() {
         {["A", "B"].map((slot) => (
           <div
             key={slot}
-            className="border border-dashed border-zinc-800 rounded p-4 text-zinc-600 flex items-center justify-center text-sm"
+            className="border border-dashed border-zinc-800 rounded p-4 text-zinc-500 flex items-center justify-center text-sm"
           >
             slot {slot} — model + runtime picker goes here
           </div>

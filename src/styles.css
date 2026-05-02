@@ -12,6 +12,7 @@ body,
 
 body {
   font-family:
+    system-ui,
     -apple-system,
     BlinkMacSystemFont,
     "Segoe UI",
@@ -21,9 +22,24 @@ body {
     sans-serif;
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
+  font-feature-settings:
+    "ss01",
+    "cv11";
+  font-variant-numeric: tabular-nums;
 }
 
-/* thin scrollbars in dark UI */
+/* Visible keyboard-focus ring everywhere; default browser outline is invisible
+   on the dark zinc surface. Applies to buttons, links, inputs, etc. */
+*:focus {
+  outline: none;
+}
+*:focus-visible {
+  outline: 2px solid theme("colors.zinc.300");
+  outline-offset: 2px;
+  border-radius: inherit;
+}
+
+/* Thin scrollbars in dark UI. */
 ::-webkit-scrollbar {
   width: 8px;
   height: 8px;

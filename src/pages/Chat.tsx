@@ -315,7 +315,7 @@ export default function ChatPage() {
           className="flex-1 overflow-y-auto px-6 py-6 space-y-5"
         >
           {bubbles.length === 0 && (
-            <div className="text-center text-zinc-600 text-sm pt-12">
+            <div className="text-center text-zinc-500 text-sm pt-12">
               Pick a model and runtime, then send a message.
             </div>
           )}
@@ -330,7 +330,7 @@ export default function ChatPage() {
               type="button"
               disabled
               title="Image attach coming in v0.4"
-              className="text-xs px-2 py-2 rounded border border-zinc-800 text-zinc-600 cursor-not-allowed"
+              className="text-xs px-2 py-2 rounded border border-zinc-800 text-zinc-500 cursor-not-allowed"
             >
               + image
             </button>
@@ -373,7 +373,7 @@ export default function ChatPage() {
             </span>
             <button
               onClick={() => setDrawer(null)}
-              className="text-zinc-500 hover:text-zinc-300 text-xs"
+              className="text-zinc-400 hover:text-zinc-300 text-xs"
             >
               close
             </button>
@@ -439,7 +439,7 @@ function HistoryDrawer({
 }: HistoryDrawerProps) {
   if (conversations.length === 0) {
     return (
-      <p className="text-xs text-zinc-600 px-4 py-6">
+      <p className="text-xs text-zinc-500 px-4 py-6">
         No saved conversations yet.
       </p>
     );
@@ -469,16 +469,16 @@ function HistoryDrawer({
             <div className="flex items-start justify-between gap-2">
               <div className="min-w-0 flex-1">
                 <div className="font-medium truncate">{c.title}</div>
-                <div className="text-[10px] text-zinc-500 truncate">
+                <div className="text-[10px] text-zinc-400 truncate">
                   {subtitle}
                 </div>
-                <div className="text-[10px] text-zinc-600 mt-0.5">
+                <div className="text-[10px] text-zinc-500 mt-0.5">
                   {RUNTIME_LABELS[c.runtime]} · {new Date(c.updated_at).toLocaleString()}
                 </div>
               </div>
               <button
                 onClick={(e) => onDelete(c.id, e)}
-                className="opacity-0 group-hover:opacity-100 text-zinc-500 hover:text-red-400 text-base leading-none"
+                className="opacity-0 group-hover:opacity-100 text-zinc-400 hover:text-red-400 text-base leading-none"
                 title="Delete"
               >
                 ×
@@ -548,11 +548,11 @@ function GenOptsDrawer({ opts, onChange, onReset }: GenOptsDrawerProps) {
       <div className="pt-2 flex justify-between">
         <button
           onClick={onReset}
-          className="text-xs text-zinc-500 hover:text-zinc-300"
+          className="text-xs text-zinc-400 hover:text-zinc-300"
         >
           reset to defaults
         </button>
-        <span className="text-[10px] text-zinc-600">
+        <span className="text-[10px] text-zinc-500">
           saved automatically
         </span>
       </div>
@@ -585,7 +585,7 @@ function SliderField({
     <div>
       <div className="flex items-baseline justify-between mb-1">
         <label className="text-xs font-mono text-zinc-300">{label}</label>
-        <span className="text-xs tabular-nums text-zinc-500">
+        <span className="text-xs tabular-nums text-zinc-400">
           {integer ? value : value.toFixed(2)}
         </span>
       </div>
@@ -598,7 +598,7 @@ function SliderField({
         onChange={(e) => onChange(Number(e.target.value))}
         className="w-full accent-zinc-300"
       />
-      <p className="text-[10px] text-zinc-600 mt-0.5">{hint}</p>
+      <p className="text-[10px] text-zinc-500 mt-0.5">{hint}</p>
     </div>
   );
 }
@@ -614,7 +614,7 @@ function SeedField({ value, onChange }: SeedFieldProps) {
     <div>
       <div className="flex items-baseline justify-between mb-1">
         <label className="text-xs font-mono text-zinc-300">seed</label>
-        <span className="text-[10px] text-zinc-600">
+        <span className="text-[10px] text-zinc-500">
           empty = random each turn
         </span>
       </div>
@@ -658,7 +658,7 @@ function BubbleView({ bubble }: BubbleViewProps) {
   return (
     <div className="flex justify-start">
       <div className="max-w-2xl flex flex-col gap-1.5">
-        <div className="flex items-center gap-2 text-[11px] text-zinc-500">
+        <div className="flex items-center gap-2 text-[11px] text-zinc-400">
           <span className="font-medium text-zinc-400">assistant</span>
           {bubble.modelId && (
             <span className="rounded bg-zinc-900 border border-zinc-800 px-1.5 py-0.5">
@@ -718,10 +718,10 @@ function StatsFooter({ metrics }: { metrics: RuntimeMetrics }) {
   if (items.length === 0) return null;
 
   return (
-    <div className="flex flex-wrap gap-x-3 gap-y-1 text-[10px] text-zinc-500 mt-1 px-1 font-mono">
+    <div className="flex flex-wrap gap-x-3 gap-y-1 text-[10px] text-zinc-400 mt-1 px-1 font-mono">
       {items.map(([k, v]) => (
         <span key={k}>
-          <span className="text-zinc-600">{k}</span>{" "}
+          <span className="text-zinc-500">{k}</span>{" "}
           <span className="text-zinc-400 tabular-nums">{v}</span>
         </span>
       ))}
@@ -737,7 +737,7 @@ function BubblePending({ status }: { status: TurnStatus }) {
         ? "thinking…"
         : "…";
   return (
-    <span className="text-zinc-500 italic flex items-center gap-2">
+    <span className="text-zinc-400 italic flex items-center gap-2">
       <span className="inline-block h-1.5 w-1.5 rounded-full bg-zinc-500 animate-pulse" />
       {label}
     </span>

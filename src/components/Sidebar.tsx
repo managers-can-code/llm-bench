@@ -13,7 +13,7 @@ export default function Sidebar() {
     <aside className="w-56 shrink-0 border-r border-zinc-800 bg-zinc-950 flex flex-col">
       <div className="px-4 py-4 border-b border-zinc-800">
         <div className="text-sm font-semibold tracking-wide">llm-bench</div>
-        <div className="text-xs text-zinc-500 mt-0.5">v0.1.0 · skeleton</div>
+        <div className="text-xs text-zinc-400 mt-0.5">v0.1.0 · skeleton</div>
       </div>
       <nav className="flex-1 px-2 py-3 space-y-0.5">
         {items.map((item) => (
@@ -31,14 +31,14 @@ export default function Sidebar() {
           >
             <span>{item.label}</span>
             {item.badge && (
-              <span className="text-[10px] uppercase tracking-wider text-zinc-500">
+              <span className="text-[10px] uppercase tracking-wider text-zinc-400">
                 {item.badge}
               </span>
             )}
           </NavLink>
         ))}
       </nav>
-      <div className="px-4 py-3 border-t border-zinc-800 text-[11px] text-zinc-600">
+      <div className="px-4 py-3 border-t border-zinc-800 text-[11px] text-zinc-500">
         llama.cpp · LiteRT-LM
       </div>
     </aside>

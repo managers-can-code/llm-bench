@@ -93,7 +93,7 @@ export default function ModelsPage() {
       <div className="flex items-start justify-between mb-6">
         <div>
           <h1 className="text-lg font-semibold mb-1">Models</h1>
-          <p className="text-sm text-zinc-500">
+          <p className="text-sm text-zinc-400">
             int4-quantized models from Unsloth. Pulled into{" "}
             <code className="text-zinc-400">~/.llm-bench/models/</code>.
           </p>
@@ -125,7 +125,7 @@ export default function ModelsPage() {
               <tr>
                 <td
                   colSpan={3 + ALL_RUNTIMES.length}
-                  className="text-center text-zinc-600 py-8 text-sm"
+                  className="text-center text-zinc-500 py-8 text-sm"
                 >
                   No models loaded.
                 </td>
@@ -135,8 +135,8 @@ export default function ModelsPage() {
               <tr key={m.id} className="border-t border-zinc-800 align-top">
                 <td className="px-3 py-3">
                   <div className="font-medium">{m.display_name}</div>
-                  <div className="text-xs text-zinc-500">{m.id}</div>
-                  <div className="text-[10px] text-zinc-600 mt-0.5 uppercase tracking-wider">
+                  <div className="text-xs text-zinc-400">{m.id}</div>
+                  <div className="text-[10px] text-zinc-500 mt-0.5 uppercase tracking-wider">
                     {m.modalities.join(" · ")}
                   </div>
                 </td>
@@ -159,7 +159,7 @@ export default function ModelsPage() {
                       {!binding ? (
                         <span className="text-xs text-zinc-700">—</span>
                       ) : !binding.available ? (
-                        <span className="text-xs text-zinc-600">build pending</span>
+                        <span className="text-xs text-zinc-500">build pending</span>
                       ) : prog && prog.state === "downloading" ? (
                         <DownloadingCell
                           p={prog}
@@ -243,9 +243,9 @@ function DownloadingCell({ p, samples, onPause }: DownloadingCellProps) {
     <div className="text-xs space-y-1 min-w-[140px]">
       <div className="flex items-center gap-2">
         <span className="text-zinc-300 tabular-nums">{pct}%</span>
-        <span className="text-zinc-500 tabular-nums">{speedLabel}</span>
+        <span className="text-zinc-400 tabular-nums">{speedLabel}</span>
         {etaLabel && (
-          <span className="text-zinc-600 tabular-nums">{etaLabel}</span>
+          <span className="text-zinc-500 tabular-nums">{etaLabel}</span>
         )}
         <button
           onClick={onPause}
@@ -350,14 +350,14 @@ function ImportDialog({ onClose, onImported }: ImportDialogProps) {
           <h2 className="font-semibold">Import a model</h2>
           <button
             onClick={onClose}
-            className="text-zinc-500 hover:text-zinc-300 text-sm"
+            className="text-zinc-400 hover:text-zinc-300 text-sm"
           >
             close
           </button>
         </div>
 
         <div>
-          <label className="block text-xs uppercase tracking-wider text-zinc-500 mb-1">
+          <label className="block text-xs uppercase tracking-wider text-zinc-400 mb-1">
             Runtime
           </label>
           <div className="flex gap-2">
@@ -379,11 +379,11 @@ function ImportDialog({ onClose, onImported }: ImportDialogProps) {
               </button>
             ))}
           </div>
-          <p className="text-xs text-zinc-500 mt-2">{FORMAT_HINT[runtime]}</p>
+          <p className="text-xs text-zinc-400 mt-2">{FORMAT_HINT[runtime]}</p>
         </div>
 
         <div>
-          <label className="block text-xs uppercase tracking-wider text-zinc-500 mb-1">
+          <label className="block text-xs uppercase tracking-wider text-zinc-400 mb-1">
             Source
           </label>
           <div className="flex gap-2">
@@ -404,7 +404,7 @@ function ImportDialog({ onClose, onImported }: ImportDialogProps) {
         </div>
 
         <div>
-          <label className="block text-xs uppercase tracking-wider text-zinc-500 mb-1">
+          <label className="block text-xs uppercase tracking-wider text-zinc-400 mb-1">
             Display name
           </label>
           <input
