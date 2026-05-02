@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from "react";
+import { Pause, Play, X as XIcon } from "lucide-react";
 import { open } from "@tauri-apps/plugin-dialog";
 import {
   listModels,
@@ -169,9 +170,11 @@ export default function ModelsPage() {
                       ) : prog && prog.state === "paused" ? (
                         <button
                           onClick={() => handleDownload(m, rt)}
-                          className="text-xs px-2 py-1 rounded border border-amber-700 text-amber-400 hover:border-amber-500"
+                          aria-label="Resume download"
+                          className="text-xs px-2 py-1 rounded border border-amber-700 text-amber-400 hover:border-amber-500 inline-flex items-center gap-1.5"
                         >
-                          ▶ resume · {(prog.bytes_done / 1_073_741_824).toFixed(1)} GB
+                          <Play size={12} fill="currentColor" />
+                          resume · {(prog.bytes_done / 1_073_741_824).toFixed(1)} GB
                         </button>
                       ) : local ? (
                         <button
@@ -250,9 +253,10 @@ function DownloadingCell({ p, samples, onPause }: DownloadingCellProps) {
         <button
           onClick={onPause}
           title="Pause"
-          className="ml-auto text-zinc-400 hover:text-zinc-100 px-1"
+          aria-label="Pause download"
+          className="ml-auto text-zinc-400 hover:text-zinc-100 p-1 rounded hover:bg-zinc-800"
         >
-          ⏸
+          <Pause size={12} fill="currentColor" />
         </button>
       </div>
       <div className="h-1 w-32 bg-zinc-800 rounded overflow-hidden">
@@ -350,9 +354,11 @@ function ImportDialog({ onClose, onImported }: ImportDialogProps) {
           <h2 className="font-semibold">Import a model</h2>
           <button
             onClick={onClose}
-            className="text-zinc-400 hover:text-zinc-300 text-sm"
+            aria-label="Close"
+            title="Close (Esc)"
+            className="text-zinc-400 hover:text-zinc-100 p-1 rounded hover:bg-zinc-900"
           >
-            close
+            <XIcon size={14} />
           </button>
         </div>
 

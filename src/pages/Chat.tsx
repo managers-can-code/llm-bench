@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from "react";
+import { History, Plus, Settings2, X as XIcon } from "lucide-react";
 import {
   listModels,
   createConversation,
@@ -290,7 +291,7 @@ export default function ChatPage() {
               active={drawer === "history"}
               onClick={() => setDrawer(drawer === "history" ? null : "history")}
             >
-              ⏱
+              <History size={14} />
             </IconButton>
             <IconButton
               label="Settings"
@@ -299,13 +300,16 @@ export default function ChatPage() {
                 setDrawer(drawer === "settings" ? null : "settings")
               }
             >
-              ⚙
+              <Settings2 size={14} />
             </IconButton>
             <button
               onClick={handleNewChat}
-              className="text-xs px-2 py-1 rounded border border-zinc-800 hover:border-zinc-600 text-zinc-400 ml-1"
+              title="New chat"
+              aria-label="New chat"
+              className="text-xs px-2 py-1 rounded border border-zinc-800 hover:border-zinc-600 text-zinc-300 ml-1 inline-flex items-center gap-1.5"
             >
-              + New chat
+              <Plus size={13} />
+              New chat
             </button>
           </div>
         </header>
@@ -373,9 +377,11 @@ export default function ChatPage() {
             </span>
             <button
               onClick={() => setDrawer(null)}
-              className="text-zinc-400 hover:text-zinc-300 text-xs"
+              aria-label="Close"
+              title="Close (Esc)"
+              className="text-zinc-400 hover:text-zinc-100 p-1 rounded hover:bg-zinc-900"
             >
-              close
+              <XIcon size={14} />
             </button>
           </div>
           <div className="flex-1 overflow-y-auto">
@@ -478,10 +484,11 @@ function HistoryDrawer({
               </div>
               <button
                 onClick={(e) => onDelete(c.id, e)}
-                className="opacity-0 group-hover:opacity-100 text-zinc-400 hover:text-red-400 text-base leading-none"
+                className="opacity-30 group-hover:opacity-100 focus-visible:opacity-100 text-zinc-400 hover:text-red-400 p-0.5 rounded"
                 title="Delete"
+                aria-label="Delete conversation"
               >
-                ×
+                <XIcon size={12} />
               </button>
             </div>
           </li>
