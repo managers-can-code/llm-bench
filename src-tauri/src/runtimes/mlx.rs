@@ -337,7 +337,10 @@ impl Runtime for MlxRuntime {
                                     (bs, buf, started, first_token, pending_usage, final_emitted),
                                 ));
                             }
-                            SseEvent::Chunk(mut chunk) => {
+                            SseEvent::Chunk { mut chunk, usage } => {
+                                if let Some(u) = usage {
+                                    pending_usage = Some(u);
+                                }
                                 if !chunk.text.is_empty() && first_token.is_none() {
                                     first_token = Some(Instant::now());
                                 }
@@ -447,10 +450,17 @@ struct StreamOptions {
 
 #[derive(Clone, Copy, Debug, Default, Deserialize)]
 struct OaiUsage {
-    #[serde(default)]
+    /// mlx_lm.server uses prompt_tokens; mlx_vlm.server uses input_tokens.
+    #[serde(default, alias = "input_tokens")]
     prompt_tokens: u32,
-    #[serde(default)]
+    #[serde(default, alias = "output_tokens")]
     completion_tokens: u32,
+    /// mlx-vlm extension: server-reported prefill / decode tok/s. When
+    /// present, prefer these over our wall-clock derived values.
+    #[serde(default)]
+    prompt_tps: Option<f32>,
+    #[serde(default)]
+    generation_tps: Option<f32>,
 }
 
 #[derive(Serialize)]
@@ -512,7 +522,14 @@ fn to_oai_message(m: &Message) -> OaiMessage {
 }
 
 enum SseEvent {
-    Chunk(TokenChunk),
+    /// A streamed delta. `usage` rides along when the server includes it
+    /// on every frame (mlx-vlm style). The unfold loop stashes the latest
+    /// non-None usage and emits it on the final done chunk.
+    Chunk {
+        chunk: TokenChunk,
+        usage: Option<OaiUsage>,
+    },
+    /// Standalone usage frame (mlx_lm.server style — empty choices).
     Usage(OaiUsage),
     Done,
 }
@@ -544,30 +561,29 @@ fn take_event(buf: &str) -> Option<(SseEvent, String)> {
         Ok(f) => f,
         Err(_) => {
             return Some((
-                SseEvent::Chunk(TokenChunk {
-                    text: String::new(),
-                    done: false,
-                    metrics: None,
-                }),
+                SseEvent::Chunk {
+                    chunk: TokenChunk {
+                        text: String::new(),
+                        done: false,
+                        metrics: None,
+                    },
+                    usage: None,
+                },
                 rest,
             ));
         }
     };
 
-    if let Some(u) = frame.usage {
-        return Some((SseEvent::Usage(u), rest));
-    }
-
-    // OpenAI-compat streaming sends one choice per frame. mlx_lm.server has
-    // been observed sending two choices both carrying the same delta — treating
-    // each emits every token twice. Take only choice[0].
+    // Extract content from choice[0]. mlx-vlm includes 'usage' on EVERY
+    // frame, so we can't short-circuit on usage; capture both and let the
+    // unfold stash the latest usage for the final done chunk.
     let mut text = String::new();
     let mut done = false;
+    let has_choice = !frame.choices.is_empty();
     if let Some(c) = frame.choices.into_iter().next() {
         if let Some(t) = c.delta.content {
             text.push_str(&t);
         } else if let Some(msg) = c.message {
-            // mlx-vlm fallback path (see NonStreamMessage doc).
             if let Some(t) = msg.content {
                 text.push_str(&t);
             }
@@ -576,15 +592,22 @@ fn take_event(buf: &str) -> Option<(SseEvent, String)> {
             done = true;
         }
     }
-    if !text.is_empty() {
-        tracing::debug!(text = %text.chars().take(40).collect::<String>(), "mlx chunk");
+
+    // No choice + usage → mlx_lm.server-style standalone usage frame.
+    if !has_choice {
+        if let Some(u) = frame.usage {
+            return Some((SseEvent::Usage(u), rest));
+        }
     }
     Some((
-        SseEvent::Chunk(TokenChunk {
-            text,
-            done,
-            metrics: None,
-        }),
+        SseEvent::Chunk {
+            chunk: TokenChunk {
+                text,
+                done,
+                metrics: None,
+            },
+            usage: frame.usage,
+        },
         rest,
     ))
 }
@@ -596,21 +619,27 @@ fn build_metrics(u: &OaiUsage, started: Instant, first_token: Option<Instant>) -
         .map(|t| (t - started).as_millis() as u32)
         .unwrap_or(0);
 
-    let decode_secs = if total_ms > ttft_ms {
-        (total_ms - ttft_ms) as f32 / 1000.0
-    } else {
-        0.0
-    };
-    let decode = if decode_secs > 0.0 && u.completion_tokens > 0 {
-        u.completion_tokens as f32 / decode_secs
-    } else {
-        0.0
-    };
-    let prefill = if ttft_ms > 0 && u.prompt_tokens > 0 {
-        u.prompt_tokens as f32 / (ttft_ms as f32 / 1000.0)
-    } else {
-        0.0
-    };
+    // Prefer server-reported tok/s when available (mlx-vlm exposes these);
+    // fall back to wall-clock derived numbers otherwise.
+    let decode = u.generation_tps.unwrap_or_else(|| {
+        let decode_secs = if total_ms > ttft_ms {
+            (total_ms - ttft_ms) as f32 / 1000.0
+        } else {
+            0.0
+        };
+        if decode_secs > 0.0 && u.completion_tokens > 0 {
+            u.completion_tokens as f32 / decode_secs
+        } else {
+            0.0
+        }
+    });
+    let prefill = u.prompt_tps.unwrap_or_else(|| {
+        if ttft_ms > 0 && u.prompt_tokens > 0 {
+            u.prompt_tokens as f32 / (ttft_ms as f32 / 1000.0)
+        } else {
+            0.0
+        }
+    });
 
     RuntimeMetrics {
         tokens_per_sec_decode: decode,
