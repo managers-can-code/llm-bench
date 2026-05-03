@@ -98,11 +98,19 @@ pub async fn run_benchmark<R: Runtime + ?Sized>(
 
     let mut peak_ram_kb = baseline_ram_kb;
     let mut last_metrics = None;
+    // Track wall-clock TTFT and total streamed text length so we can derive
+    // metrics ourselves when the runtime's adapter doesn't surface them
+    // (e.g. llama-server builds without stream_options.include_usage support).
+    let mut first_chunk_at: Option<Instant> = None;
+    let mut total_chars: usize = 0;
     while let Some(chunk_res) = stream.next().await {
         let chunk = chunk_res?;
-        // Sample RAM occasionally; cheaper than per-chunk.
         sys.refresh_memory();
         peak_ram_kb = peak_ram_kb.max(sys.used_memory());
+        if !chunk.text.is_empty() && first_chunk_at.is_none() {
+            first_chunk_at = Some(Instant::now());
+        }
+        total_chars += chunk.text.len();
         if let Some(m) = chunk.metrics {
             last_metrics = Some(m);
         }
@@ -115,21 +123,70 @@ pub async fn run_benchmark<R: Runtime + ?Sized>(
     let metrics = last_metrics.unwrap_or_default();
     let peak_ram_mb = peak_ram_kb.saturating_sub(baseline_ram_kb) / 1024;
 
+    // Fallback derivations from our own wall-clock when the runtime didn't
+    // surface metrics. ~4 chars per token is a rough estimate but stable
+    // enough for bench comparison. If the runtime DID give us numbers, we
+    // prefer those.
+    let measured_ttft_ms = first_chunk_at
+        .map(|t| (t - started).as_millis() as u32)
+        .unwrap_or(0);
+    let est_tokens = (total_chars / 4) as u32;
+    let measured_decode_tps = if total_ms > measured_ttft_ms && est_tokens > 0 {
+        let secs = (total_ms - measured_ttft_ms) as f32 / 1000.0;
+        if secs > 0.0 {
+            est_tokens as f32 / secs
+        } else {
+            0.0
+        }
+    } else {
+        0.0
+    };
+
+    let ttft_ms = if metrics.ttft_ms > 0 {
+        metrics.ttft_ms as f32
+    } else {
+        measured_ttft_ms as f32
+    };
+    let decode_tps = if metrics.tokens_per_sec_decode > 0.0 {
+        metrics.tokens_per_sec_decode
+    } else {
+        measured_decode_tps
+    };
+    let prompt_tokens = if metrics.prompt_tokens > 0 {
+        metrics.prompt_tokens
+    } else {
+        // Rough estimate from prompt length.
+        (cfg.prompt_chars / 4).max(1)
+    };
+    let completion_tokens = if metrics.completion_tokens > 0 {
+        metrics.completion_tokens
+    } else {
+        est_tokens
+    };
+    let device = metrics
+        .hardware
+        .clone()
+        .unwrap_or_else(|| match runtime.id() {
+            crate::runtimes::RuntimeId::LlamaCpp => "llama.cpp · est".into(),
+            crate::runtimes::RuntimeId::LiteRtLm => "LiteRT-LM · est".into(),
+            crate::runtimes::RuntimeId::Mlx => "MLX · est".into(),
+        });
+
     Ok(BenchRun {
         id: Uuid::new_v4().to_string(),
         model_id: model.id.clone(),
         runtime: runtime.id(),
-        device: metrics.hardware.clone().unwrap_or_else(|| "unknown".into()),
-        prompt_tokens: metrics.prompt_tokens,
-        decode_tokens: metrics.completion_tokens,
-        ttft_ms: metrics.ttft_ms as f32,
+        device: device.clone(),
+        prompt_tokens,
+        decode_tokens: completion_tokens,
+        ttft_ms,
         prefill_tok_per_s: metrics.tokens_per_sec_prefill,
-        decode_tok_per_s: metrics.tokens_per_sec_decode,
+        decode_tok_per_s: decode_tps,
         total_ms,
         peak_ram_mb,
         peak_vram_mb: 0, // TODO: NVML on NVIDIA, IOReg on Apple Silicon
         energy_j: None,
-        hardware: metrics.hardware,
+        hardware: Some(device),
         started_at,
     })
 }
