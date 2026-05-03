@@ -366,6 +366,7 @@ pub async fn start_chat_turn(
     let opts = GenOpts {
         temperature: opts.temperature.or(Some(0.7)),
         top_p: opts.top_p.or(Some(0.95)),
+        top_k: opts.top_k.or(Some(40)),
         max_tokens: opts.max_tokens.or(Some(512)),
         seed: opts.seed,
     };
