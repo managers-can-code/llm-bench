@@ -457,6 +457,41 @@ pub async fn cancel_chat(_state: State<'_, AppState>, _turn_id: String) -> AppRe
     Err(AppError::NotImplemented("cancel_chat"))
 }
 
+/* ---------- benchmarks ---------- */
+
+#[tauri::command]
+pub async fn list_bench_runs(state: State<'_, AppState>) -> AppResult<Vec<crate::bench::BenchRun>> {
+    let store = state.store.lock().await;
+    store.list_bench_runs()
+}
+
+#[tauri::command]
+pub async fn delete_bench_run(state: State<'_, AppState>, id: String) -> AppResult<()> {
+    let store = state.store.lock().await;
+    store.delete_bench_run(&id)
+}
+
+#[tauri::command]
+pub async fn run_benchmark(
+    state: State<'_, AppState>,
+    model_id: String,
+    runtime: RuntimeId,
+    cfg: Option<crate::bench::BenchCfg>,
+) -> AppResult<crate::bench::BenchRun> {
+    let model = {
+        let reg = state.registry.lock().await;
+        reg.find(&model_id)
+            .ok_or_else(|| AppError::NotFound(model_id.clone()))?
+            .clone()
+    };
+    let cfg = cfg.unwrap_or_default();
+    let rt = state.runtime(runtime);
+    let run = crate::bench::run_benchmark(rt.as_ref(), &model, &cfg).await?;
+    let store = state.store.lock().await;
+    store.insert_bench_run(&run)?;
+    Ok(run)
+}
+
 /* ---------- runtime status ---------- */
 
 #[derive(Clone, Debug, Serialize)]

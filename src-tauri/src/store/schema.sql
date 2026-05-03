@@ -40,6 +40,7 @@ CREATE TABLE IF NOT EXISTS bench_runs (
     ttft_ms           REAL,
     prefill_tok_per_s REAL,
     decode_tok_per_s  REAL,
+    total_ms          INTEGER DEFAULT 0,
     peak_ram_mb       INTEGER,
     peak_vram_mb      INTEGER,
     energy_j          REAL,

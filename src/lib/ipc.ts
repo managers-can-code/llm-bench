@@ -8,6 +8,8 @@ import type {
   TokenChunk,
   DownloadProgress,
   RuntimeId,
+  BenchCfg,
+  BenchRun,
 } from "./types";
 
 /* ---------- models / registry ---------- */
@@ -84,6 +86,21 @@ export const onChatChunk = (
   cb: (chunk: TokenChunk) => void,
 ): Promise<UnlistenFn> =>
   listen<TokenChunk>(`chat:chunk:${conversationId}`, (e) => cb(e.payload));
+
+/* ---------- benchmarks ---------- */
+
+export const runBenchmark = (
+  modelId: string,
+  runtime: RuntimeId,
+  cfg?: BenchCfg,
+): Promise<BenchRun> =>
+  invoke("run_benchmark", { modelId, runtime, cfg: cfg ?? null });
+
+export const listBenchRuns = (): Promise<BenchRun[]> =>
+  invoke("list_bench_runs");
+
+export const deleteBenchRun = (id: string): Promise<void> =>
+  invoke("delete_bench_run", { id });
 
 /* ---------- runtime status ---------- */
 

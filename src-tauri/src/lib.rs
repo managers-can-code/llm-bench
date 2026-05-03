@@ -111,6 +111,9 @@ pub fn run() {
             commands::start_chat_turn,
             commands::cancel_chat,
             commands::runtime_status,
+            commands::run_benchmark,
+            commands::list_bench_runs,
+            commands::delete_bench_run,
         ])
         .setup(|_app| {
             tracing::info!("llm-bench starting");

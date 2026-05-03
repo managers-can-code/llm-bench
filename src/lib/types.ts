@@ -99,6 +99,29 @@ export interface RuntimeMetrics {
   hardware?: string;
 }
 
+export interface BenchCfg {
+  prompt_chars?: number;
+  max_decode_tokens?: number;
+}
+
+export interface BenchRun {
+  id: string;
+  model_id: string;
+  runtime: RuntimeId;
+  device: string;
+  prompt_tokens: number;
+  decode_tokens: number;
+  ttft_ms: number;
+  prefill_tok_per_s: number;
+  decode_tok_per_s: number;
+  total_ms: number;
+  peak_ram_mb: number;
+  peak_vram_mb: number;
+  energy_j?: number;
+  hardware?: string;
+  started_at: number;
+}
+
 export interface DownloadProgress {
   model_id: string;
   runtime: RuntimeId;
