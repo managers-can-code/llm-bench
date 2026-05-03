@@ -471,12 +471,23 @@ struct StreamFrame {
 struct StreamChoice {
     #[serde(default)]
     delta: Delta,
+    /// mlx-vlm sometimes returns the full assistant turn under `message`
+    /// (non-streaming format) even when stream=true. Fall back to it when
+    /// delta.content is empty.
+    #[serde(default)]
+    message: Option<NonStreamMessage>,
     #[serde(default)]
     finish_reason: Option<String>,
 }
 
 #[derive(Default, Deserialize)]
 struct Delta {
+    #[serde(default)]
+    content: Option<String>,
+}
+
+#[derive(Deserialize)]
+struct NonStreamMessage {
     #[serde(default)]
     content: Option<String>,
 }
@@ -555,10 +566,18 @@ fn take_event(buf: &str) -> Option<(SseEvent, String)> {
     if let Some(c) = frame.choices.into_iter().next() {
         if let Some(t) = c.delta.content {
             text.push_str(&t);
+        } else if let Some(msg) = c.message {
+            // mlx-vlm fallback path (see NonStreamMessage doc).
+            if let Some(t) = msg.content {
+                text.push_str(&t);
+            }
         }
         if c.finish_reason.is_some() {
             done = true;
         }
+    }
+    if !text.is_empty() {
+        tracing::debug!(text = %text.chars().take(40).collect::<String>(), "mlx chunk");
     }
     Some((
         SseEvent::Chunk(TokenChunk {
