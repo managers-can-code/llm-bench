@@ -71,9 +71,11 @@ pub async fn run_benchmark<R: Runtime + ?Sized>(
         .unwrap_or(0);
 
     // Sample baseline RAM before load to compute peak delta.
+    // sysinfo >= 0.30 returns memory in BYTES (not KB) from used_memory().
+    // We convert to MB at the end.
     let mut sys = System::new();
     sys.refresh_memory();
-    let baseline_ram_kb = sys.used_memory();
+    let baseline_ram_bytes = sys.used_memory();
 
     let handle = runtime.load(model, LoadOpts::default()).await?;
 
@@ -96,7 +98,7 @@ pub async fn run_benchmark<R: Runtime + ?Sized>(
     let started = Instant::now();
     let mut stream = runtime.chat(&handle, &messages, opts).await?;
 
-    let mut peak_ram_kb = baseline_ram_kb;
+    let mut peak_ram_bytes = baseline_ram_bytes;
     let mut last_metrics = None;
     // Track wall-clock TTFT and total streamed text length so we can derive
     // metrics ourselves when the runtime's adapter doesn't surface them
@@ -106,7 +108,7 @@ pub async fn run_benchmark<R: Runtime + ?Sized>(
     while let Some(chunk_res) = stream.next().await {
         let chunk = chunk_res?;
         sys.refresh_memory();
-        peak_ram_kb = peak_ram_kb.max(sys.used_memory());
+        peak_ram_bytes = peak_ram_bytes.max(sys.used_memory());
         if !chunk.text.is_empty() && first_chunk_at.is_none() {
             first_chunk_at = Some(Instant::now());
         }
@@ -121,7 +123,8 @@ pub async fn run_benchmark<R: Runtime + ?Sized>(
     let total_ms = (Instant::now() - started).as_millis() as u32;
 
     let metrics = last_metrics.unwrap_or_default();
-    let peak_ram_mb = peak_ram_kb.saturating_sub(baseline_ram_kb) / 1024;
+    // bytes → MB.
+    let peak_ram_mb = peak_ram_bytes.saturating_sub(baseline_ram_bytes) / (1024 * 1024);
 
     // Fallback derivations from our own wall-clock when the runtime didn't
     // surface metrics. ~4 chars per token is a rough estimate but stable
@@ -158,6 +161,15 @@ pub async fn run_benchmark<R: Runtime + ?Sized>(
         // Rough estimate from prompt length.
         (cfg.prompt_chars / 4).max(1)
     };
+    // Prefill tok/s fallback: prompt_tokens / TTFT. Only meaningful when we
+    // have both. Server-reported value still wins when present.
+    let prefill_tps = if metrics.tokens_per_sec_prefill > 0.0 {
+        metrics.tokens_per_sec_prefill
+    } else if measured_ttft_ms > 0 && prompt_tokens > 0 {
+        prompt_tokens as f32 / (measured_ttft_ms as f32 / 1000.0)
+    } else {
+        0.0
+    };
     let completion_tokens = if metrics.completion_tokens > 0 {
         metrics.completion_tokens
     } else {
@@ -180,7 +192,7 @@ pub async fn run_benchmark<R: Runtime + ?Sized>(
         prompt_tokens,
         decode_tokens: completion_tokens,
         ttft_ms,
-        prefill_tok_per_s: metrics.tokens_per_sec_prefill,
+        prefill_tok_per_s: prefill_tps,
         decode_tok_per_s: decode_tps,
         total_ms,
         peak_ram_mb,
