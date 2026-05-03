@@ -39,6 +39,11 @@ struct Inner {
 struct ServerProcess {
     child: Child,
     model_id: String,
+    /// Stable identifier we send in the OpenAI-compat `model` field. For
+    /// mlx_lm.server this is the magic string "default_model"; for
+    /// mlx_vlm.server it must be the actual on-disk path because that
+    /// server treats any other string as an HF repo to fetch.
+    request_model_id: String,
 }
 
 impl Drop for ServerProcess {
@@ -214,9 +219,22 @@ impl Runtime for MlxRuntime {
                 e
             ))
         })?;
+        // mlx_lm.server uses the literal "default_model" magic string; mlx_vlm.server
+        // does NOT, and treats any string we send as an HF repo to fetch. Pin the
+        // request id to the actual on-disk path for VLM and to "default_model" for LM.
+        let is_multimodal = model
+            .modalities
+            .iter()
+            .any(|m| !matches!(m, crate::core::Modality::Text));
+        let request_model_id = if is_multimodal {
+            model_path.to_string_lossy().into_owned()
+        } else {
+            "default_model".to_string()
+        };
         g.server = Some(ServerProcess {
             child,
             model_id: model.id.clone(),
+            request_model_id,
         });
 
         let url = format!("{}/v1/models", g.base_url);
@@ -258,10 +276,15 @@ impl Runtime for MlxRuntime {
         let g = self.inner.lock().await;
         let url = format!("{}/v1/chat/completions", g.base_url);
         let http = g.http.clone();
+        let request_model = g
+            .server
+            .as_ref()
+            .map(|s| s.request_model_id.clone())
+            .unwrap_or_else(|| "default_model".to_string());
         drop(g);
 
         let body = ChatRequest {
-            model: "default_model".into(),
+            model: request_model,
             messages: msgs.iter().map(to_oai_message).collect(),
             stream: true,
             stream_options: Some(StreamOptions {
